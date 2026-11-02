@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Via 播放器测试台</title>
+<style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #f6f6f4; color: #222; }
+    header { padding: 16px 20px 8px; }
+    h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+    p.sub { margin: 0; font-size: 12px; color: #777; }
+    .grid { display: grid; gap: 14px; padding: 14px 20px 24px; grid-template-columns: 1fr 1fr; }
+    .card { background: #fff; border: 1px solid #e3e2dd; border-radius: 10px; padding: 12px; }
+    .card h2 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+    .card .hint { font-size: 11px; color: #888; margin-top: 6px; }
+    video { width: 100%; background: #000; border-radius: 6px; display: block; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+    td { padding: 3px 0; border-bottom: 1px solid #f0efea; }
+    td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+    .wide { grid-column: 1 / -1; }
+</style>
+</head>
+<body>
+<header>
+    <h1>Via 视频播放器 · 浏览器测试台</h1>
+    <p class="sub">左：本地 mp4（无网络瓶颈，作为流畅对照）· 右：公网 HLS（弱网，用来看策略行为）</p>
+</header>
+
+<div class="grid">
+    <div class="card">
+        <h2>本地 mp4</h2>
+        <video id="mp4" src="/e2e/flower.mp4" muted playsinline preload="metadata"></video>
+        <div class="hint">同源直连，用来验证播放器本身不产生卡顿</div>
+    </div>
+    <div class="card">
+        <h2>公网 HLS</h2>
+        <video id="hls" muted playsinline></video>
+        <div class="hint">unified-streaming 5 档码率，用来压 hls.js 策略</div>
+    </div>
+
+    <div class="card wide">
+        <h2>实时指标</h2>
+        <table id="metrics">
+            <tr><td>状态</td><td id="m-state">等待启动</td></tr>
+            <tr><td>播放位置</td><td id="m-time">-</td></tr>
+            <tr><td>缓冲 ahead</td><td id="m-buf">-</td></tr>
+            <tr><td>当前码率</td><td id="m-level">-</td></tr>
+            <tr><td>下载速率</td><td id="m-rate">-</td></tr>
+            <tr><td>负载</td><td id="m-load">-</td></tr>
+            <tr><td>丢帧</td><td id="m-drop">-</td></tr>
+            <tr><td>卡顿</td><td id="m-stall">-</td></tr>
+            <tr><td>嗅探结果</td><td id="m-items">-</td></tr>
+        </table>
+    </div>
+</div>
+
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+    var HLS_SRC = 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8';
+    var $ = function (id) { return document.getElementById(id); };
+
+    // 页面自己先拉一次 m3u8，让嗅探钩子能抓到这个请求
+    window.__startHls = function () {
+        if (!window.Hls || !Hls.isSupported()) return 'no-hls';
+        try {
+            var h = new Hls({ startLevel: 0, enableWorker: true });
+            h.loadSource(HLS_SRC);
+            h.attachMedia($('hls'));
+            window.__pageHls = h;
+            return 'ok';
+        } catch (e) { return String(e && e.message); }
+    };
+
+    function fmt(n, d) { return (Number(n) || 0).toFixed(d === undefined ? 1 : d); }
+
+    setInterval(function () {
+        var vv = window.__vv;
+        var items = (vv && vv.VV && vv.VV.items) || [];
+        $('m-items').textContent = items.length
+            ? items.map(function (i) { return i.type; }).join(' / ')
+            : '未嗅探到';
+
+        var a = vv && vv.VV && vv.VV.active;
+        var v = document.querySelector('.vv-player-video');
+        if (!a || !v) { $('m-state').textContent = '播放器未打开'; return; }
+
+        var inst = a.hls;
+        var lv = inst && inst.levels && inst.currentLevel >= 0 ? inst.levels[inst.currentLevel] : null;
+        var dl = (a._fragMsSum && a._fragBytesSum) ? a._fragBytesSum / a._fragMsSum : 0;
+        var need = lv && lv.bitrate ? lv.bitrate / 8000 : 0;
+        var q = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality() : null;
+
+        $('m-state').textContent = v.paused ? '已暂停' : (v.readyState >= 3 ? '播放中' : '缓冲中');
+        $('m-time').textContent = fmt(v.currentTime) + 's / ' + fmt(v.duration || 0) + 's';
+        $('m-buf').textContent = fmt(vv.bufAhead()) + 's';
+        $('m-level').textContent = lv ? (lv.height || '?') + 'P · ' + Math.round(lv.bitrate / 1000) + 'kbps' : '原生 / mp4';
+        $('m-rate').textContent = dl ? fmt(dl) + ' KB/s' : '-';
+        $('m-load').textContent = (dl && need) ? Math.round(need / dl * 100) + '%' : '-';
+        $('m-drop').textContent = q && q.totalVideoFrames
+            ? q.droppedVideoFrames + ' / ' + q.totalVideoFrames + ' (' + fmt(q.droppedVideoFrames / q.totalVideoFrames * 100, 2) + '%)'
+            : '-';
+        $('m-stall').textContent = (a._waitCount || 0) + ' 次 / ' + Math.round(a._waitMs || 0) + 'ms';
+    }, 500);
+})();
+</script>
+</body>
+</html>

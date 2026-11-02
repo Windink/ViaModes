@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>android-codec-test</title>
+<style>
+  body { margin: 0; background: #111; color: #eee; font: 16px/1.5 -apple-system, "PingFang SC", sans-serif; padding: 14px; }
+  h1 { font-size: 17px; margin: 0 0 10px; font-weight: 600; }
+  #log { white-space: pre-wrap; word-break: break-all; font: 12px/1.65 ui-monospace, Menlo, monospace; background: #1b1b1b; padding: 12px; border-radius: 8px; min-height: 55vh; }
+  video { width: 100%; max-height: 140px; background: #000; margin-top: 12px; border-radius: 6px; }
+  .warn { color: #ffb86b; }
+</style>
+</head>
+<body>
+<h1>真机 codec 释放测试（自动开关 3 轮）</h1>
+<div id="log"></div>
+<video id="v1" muted playsinline preload="metadata" src="/e2e/flower.mp4"></video>
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+    var ROUNDS = 3;
+    // mode=hls 时走 m3u8（MSE + SourceBuffer），否则走 mp4 直链（系统解码器）。
+    // 两条路径的 codec 持有者不同：前者是 SourceBuffer，后者是 MediaPlayer。
+    var MODE = /mode=hls/.test(location.search) ? 'hls' : 'mp4';
+    var HLS_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+    var PLAY_MS = MODE === 'hls' ? 14000 : 6000;
+    var logEl = document.getElementById('log');
+    var lines = [];
+
+    function log(s) {
+        var d = new Date();
+        var t = d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+        lines.push('[' + t + '] ' + s);
+        logEl.textContent = lines.join('\n');
+        // 标题同步一行摘要，方便 adb / 截图快速确认进度
+        document.title = s;
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function item() {
+        return MODE === 'hls'
+            ? { url: HLS_URL, type: 'HLS', name: 'android-hls' }
+            : { url: location.origin + '/e2e/flower.mp4', type: 'MP4', name: 'android-test' };
+    }
+    function snap() {
+        var v = document.querySelector('.vv-player-video');
+        return {
+            pool: window.__vv ? window.__vv.hlsPool() : -1,
+            srcLen: window.__vv ? window.__vv.videoSrcLen() : -1,
+            root: !!document.getElementById('vv-player-root'),
+            paused: v ? v.paused : null,
+            rs: v ? v.readyState : null
+        };
+    }
+
+    (async function () {
+        log('boot mode=' + MODE + ' vvdebug=' + (location.search.indexOf('vvdebug=1') >= 0) + ' url=' + item().url.slice(0, 60));
+        await wait(1500);
+        if (!window.__vv) {
+            log('FATAL: __vv 不存在，地址要带 ?vvdebug=1');
+            return;
+        }
+        log('句柄就绪，开始循环');
+
+        for (var i = 1; i <= ROUNDS; i++) {
+            log('R' + i + ' open');
+            try { window.__vv.open(item()); } catch (e) { log('R' + i + ' open 异常: ' + e.message); }
+            await wait(PLAY_MS);
+            log('R' + i + ' 播放中 ' + JSON.stringify(snap()));
+
+            log('R' + i + ' close');
+            try { window.__vv.close(); } catch (e) { log('R' + i + ' close 异常: ' + e.message); }
+            await wait(1200);
+            log('R' + i + ' 关闭+1.2s ' + JSON.stringify(snap()));
+            await wait(2000);
+            log('R' + i + ' 关闭+3.2s ' + JSON.stringify(snap()));
+            await wait(1800);
+        }
+        log('DONE 全部完成');
+    })();
+})();
+</script>
+</body>
+</html>

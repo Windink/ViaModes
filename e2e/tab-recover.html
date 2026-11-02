@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tab-recover</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.55 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 28px/1.2 sans-serif; color:#fff; }
+  #sub { color:#7fd1ff; margin:4px 0 10px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .warn { color:#ffb86b; }
+  .ok { color:#7ee787; }
+</style>
+</head>
+<body>
+<div id="tag">?</div>
+<div id="sub"></div>
+<div id="log"></div>
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var ROLE = q.get('role') || 'host';
+  var HOLD = Number(q.get('hold') || 25000);   // 占位页存活时长，到点自我关闭把父页顶回前台
+  var OPEN_AT = Number(q.get('openAt') || 12000);
+  var logEl = document.getElementById('log');
+  document.getElementById('tag').textContent = (ROLE === 'host' ? 'HOST' : 'GUEST');
+  var sub = document.getElementById('sub');
+  var lines = 0;
+
+  function log(s, cls) {
+    if (lines++ > 120) return;
+    var d = new Date();
+    var div = document.createElement('div');
+    div.innerHTML = cls ? '<span class="' + cls + '">' + s + '</span>' : s;
+    logEl.appendChild(div);
+    document.title = ROLE + ' ' + s.replace(/<[^>]+>/g, '');
+  }
+  function probe() {
+    var v = document.querySelector('.vv-player-video');
+    var dbg = window.__vv || {};
+    return {
+      hidden: document.hidden,
+      pool: typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : -1,
+      root: !!document.getElementById('vv-player-root'),
+      rs: v ? v.readyState : -1,
+      t: v ? +v.currentTime.toFixed(1) : -1,
+      paused: v ? v.paused : null,
+      w: v ? v.videoWidth : 0
+    };
+  }
+  function brief(o) {
+    return 'hidden=' + o.hidden + ' pool=' + o.pool + ' root=' + (o.root ? 1 : 0) +
+           ' rs=' + o.rs + ' t=' + o.t + ' ' + o.w + 'px' + (o.paused ? ' P' : ' RUN');
+  }
+  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  log('boot role=' + ROLE + ' hidden=' + document.hidden + ' vv=' + !!window.__vv);
+  document.addEventListener('visibilitychange', function () {
+    log('visibilitychange hidden=' + document.hidden + ' ' + brief(probe()), 'warn');
+  });
+  window.addEventListener('pageshow', function () { log('pageshow persisted=' + (event && event.persisted)); });
+  window.addEventListener('resume', function () { log('resume 事件'); });
+  window.addEventListener('freeze', function () { log('freeze 事件'); });
+
+  var tick = setInterval(function () {
+    var o = probe();
+    sub.textContent = brief(o);
+    // 只打印变化点，避免刷屏
+    var key = o.hidden + '|' + o.pool + '|' + o.root + '|' + o.rs + '|' + o.paused;
+    if (key !== window.__lastKey) {
+      window.__lastKey = key;
+      log('状态 ' + brief(o));
+    }
+  }, 1500);
+
+  if (ROLE === 'guest') {
+    log('占位页，' + (HOLD / 1000) + 's 后自我关闭');
+    setTimeout(function () {
+      log('window.close() 交还前台');
+      try { window.close(); } catch (e) { log('close 被拒 ' + e.message, 'warn'); }
+    }, HOLD);
+    return;
+  }
+
+  (async function () {
+    await wait(1200);
+    if (!window.__vv) { log('FATAL __vv 缺失', 'warn'); return; }
+    log('open 播放器', 'ok');
+    try {
+      window.__vv.open({
+        url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        type: 'HLS', name: 'recover'
+      });
+    } catch (e) { log('open 异常 ' + e.message, 'warn'); }
+
+    await wait(OPEN_AT);
+    log('打开占位页，自己将进入后台');
+    var url = location.pathname + '?role=guest&hold=' + HOLD + '&a=' + Date.now();
+    var w = window.open(url, '_blank');
+    log('window.open guest => ' + (w ? 'ok' : 'null'), w ? 'ok' : 'warn');
+
+    // 回到前台后继续观察 30 秒
+    await wait(HOLD + 30000);
+    log('最终 ' + brief(probe()), 'ok');
+    clearInterval(tick);
+    log('DONE');
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tab-farm</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.55 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 28px/1.2 sans-serif; color:#fff; }
+  #sub { color:#7fd1ff; margin:4px 0 10px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .warn { color:#ffb86b; }
+  .ok { color:#7ee787; }
+</style>
+</head>
+<body>
+<div id="tag">?</div>
+<div id="sub"></div>
+<div id="all" style="color:#ffd479;margin-bottom:8px;"></div>
+<div id="log"></div>
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var D = Number(q.get('d') || 0);              // 本页层级
+  var MAX = Number(q.get('max') || 10);         // 总页数
+  var SPAWN = Number(q.get('spawn') || 3000);   // 起播后多久派生下一页
+  var PLAY = q.get('play') !== '0';             // 是否起播
+  var MODE = q.get('mode') || 'mp4';
+  var CLOSE_AT = Number(q.get('closeAt') || 0); // 起播后多少秒自动关（0=不关）
+  var logEl = document.getElementById('log');
+  document.getElementById('tag').textContent = 'TAB ' + D;
+  var sub = document.getElementById('sub');
+
+  function log(s, cls) {
+    var d = new Date();
+    var div = document.createElement('div');
+    div.innerHTML = cls ? '<span class="' + cls + '">' + s + '</span>' : s;
+    logEl.appendChild(div);
+    document.title = 'D' + D + ' ' + s.replace(/<[^>]+>/g, '');
+    paint();
+  }
+  function paint() {
+    var v = document.querySelector('.vv-player-video');
+    var dbg = window.__vv || {};
+    sub.textContent = 'hidden=' + document.hidden + ' pool=' +
+      (typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : '-') +
+      ' root=' + !!document.getElementById('vv-player-root') +
+      ' rs=' + (v ? v.readyState : '-') + ' t=' + (v ? (+v.currentTime).toFixed(1) : '-');
+    // 每页把自己的状态写进同源 localStorage，任何一页在前台都能汇总出全局视图，
+    // 用来判断后台页是"休眠但仍然活着"还是"整页被销毁"
+    try {
+      var rec = {
+        d: D, hidden: document.hidden, pool: (typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : -1),
+        root: !!document.getElementById('vv-player-root'),
+        rs: v ? v.readyState : -1, t: v ? +v.currentTime.toFixed(1) : -1,
+        paused: v ? v.paused : null, ts: Date.now()
+      };
+      localStorage.setItem('farm_' + D, JSON.stringify(rec));
+    } catch (e) {}
+    try {
+      var out = [];
+      for (var i = 0; i < MAX; i++) {
+        var raw = localStorage.getItem('farm_' + i);
+        if (!raw) { out.push('D' + i + ':无'); continue; }
+        var r = JSON.parse(raw);
+        var age = Math.round((Date.now() - r.ts) / 1000);
+        out.push('D' + r.d + (r.hidden ? 'H' : 'V') + ' p' + r.pool + ' r' + (r.root ? 1 : 0) +
+                 ' rs' + r.rs + ' ' + age + 's');
+      }
+      document.getElementById('all').textContent = out.join(' | ');
+    } catch (e2) {}
+  }
+  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  function item() {
+    return MODE === 'hls'
+      ? { url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', type: 'HLS', name: 'tab' + D }
+      : { url: location.origin + '/e2e/flower.mp4', type: 'MP4', name: 'tab' + D };
+  }
+
+  log('boot d=' + D + '/' + MAX + ' hidden=' + document.hidden + ' play=' + PLAY);
+  document.addEventListener('visibilitychange', function () {
+    log('visibilitychange hidden=' + document.hidden, 'warn');
+  });
+  setInterval(paint, 2000);
+
+  (async function () {
+    await wait(1000);
+    if (PLAY && window.__vv) {
+      log('open 播放器', 'ok');
+      try { window.__vv.open(item()); } catch (e) { log('open 异常 ' + e.message, 'warn'); }
+    } else if (PLAY && !window.__vv) {
+      log('FATAL __vv 缺失', 'warn');
+    }
+
+    // onlyLast=1 时只有末页才自动关，用来验证"10 页全开过之后能否全部归零"
+    var doClose = CLOSE_AT > 0 && q.get('onlyLast') !== '1' || (CLOSE_AT > 0 && D + 1 >= MAX);
+    if (doClose) {
+      await wait(CLOSE_AT * 1000);
+      log('自动关闭', 'warn');
+      try { window.__vv.close(); } catch (e) {}
+    }
+
+    await wait(SPAWN);
+    if (D + 1 < MAX) {
+      var url = location.pathname + '?vvdebug=1&d=' + (D + 1) + '&max=' + MAX + '&spawn=' + SPAWN +
+                '&mode=' + MODE + '&play=' + (PLAY ? 1 : 0) + '&closeAt=' + CLOSE_AT +
+                '&onlyLast=' + (q.get('onlyLast') || '0') + '&a=' + Date.now();
+      var w = null;
+      try { w = window.open(url, '_blank'); } catch (e) { log('open next 异常 ' + e.message, 'warn'); return; }
+      log('派生子页 D' + (D + 1) + ' => ' + (w ? 'ok' : 'null(被拦)'), w ? 'ok' : 'warn');
+    } else {
+      log('VIRGIN 末页，不再派生', 'ok');
+    }
+  })();
+})();
+</script>
+</body>
+</html>

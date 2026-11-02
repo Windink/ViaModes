@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tab-chain</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.6 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 30px/1.2 sans-serif; color:#fff; margin:2px 0 4px; }
+  #sub { color:#7fd1ff; margin-bottom:8px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .warn { color:#ffb86b; }
+  .ok { color:#7ee787; }
+</style>
+</head>
+<body>
+<div id="tag">?</div>
+<div id="sub"></div>
+<div id="log"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var DEPTH = Number(q.get('d') || 0);          // 自己是第几层（0 开始）
+  var MAX = Number(q.get('max') || 3);          // 总共要开几层
+  var CHAIN = q.get('chain') !== '0';
+  var OPEN_DELAY = Number(q.get('od') || 900);  // 尽早开下一个，弹窗配额可能只在刚加载时有效
+  var logEl = document.getElementById('log');
+  document.getElementById('tag').textContent = 'TAB ' + DEPTH;
+  document.getElementById('sub').textContent = 'hidden=' + document.hidden + ' vis=' + document.visibilityState;
+
+  function log(s, cls) {
+    var d = new Date();
+    var div = document.createElement('div');
+    div.innerHTML = cls ? '<span class="' + cls + '">' + s + '</span>' : s;
+    logEl.appendChild(div);
+    document.title = 'D' + DEPTH + ' ' + s.replace(/<[^>]+>/g, '');
+  }
+  log('boot d=' + DEPTH + '/' + MAX + ' hidden=' + document.hidden);
+  document.addEventListener('visibilitychange', function () {
+    log('visibilitychange hidden=' + document.hidden, 'warn');
+    document.getElementById('sub').textContent = 'hidden=' + document.hidden + ' vis=' + document.visibilityState;
+  });
+  setTimeout(function () {
+    document.getElementById('sub').textContent = 'hidden=' + document.hidden + ' vis=' + document.visibilityState;
+  }, 3000);
+
+  if (CHAIN && DEPTH + 1 < MAX) {
+    setTimeout(function () {
+      var url = location.pathname + '?d=' + (DEPTH + 1) + '&max=' + MAX + '&od=' + OPEN_DELAY + '&a=' + Date.now();
+      var w = null;
+      try { w = window.open(url, '_blank'); } catch (e) { log('open 异常 ' + e.message, 'warn'); return; }
+      log('open D' + (DEPTH + 1) + ' => ' + (w ? 'ok' : 'null(被拦)'), w ? 'ok' : 'warn');
+    }, OPEN_DELAY);
+  }
+})();
+</script>
+</body>
+</html>

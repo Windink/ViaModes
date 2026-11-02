@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tabs-probe</title>
+<style>
+  body { margin:0; background:#111; color:#0f0; font:13px/1.5 ui-monospace,Menlo,monospace; padding:12px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .big { font-size:42px; color:#fff; font-weight:700; margin:6px 0 12px; }
+</style>
+</head>
+<body>
+<div class="big" id="tag">?</div>
+<div id="log"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var TAB = q.get('tab') || 'A';
+  document.getElementById('tag').textContent = 'TAB ' + TAB;
+  var el = document.getElementById('log');
+  function log(s) {
+    var d = new Date();
+    el.textContent += '[' + d.toTimeString().slice(0,8) + '.' + String(d.getMilliseconds()).padStart(3,'0') + '] ' + s + '\n';
+  }
+  log('boot tab=' + TAB);
+  log('hidden=' + document.hidden + ' vis=' + document.visibilityState + ' hasFocus=' + document.hasFocus());
+  document.addEventListener('visibilitychange', function () {
+    log('visibilitychange hidden=' + document.hidden + ' vis=' + document.visibilityState);
+  });
+  window.addEventListener('focus', function () { log('window focus'); });
+  window.addEventListener('blur', function () { log('window blur'); });
+  // 每 2 秒打一次心跳，方便截图判断哪个页还活着
+  setInterval(function () { log('tick hidden=' + document.hidden); }, 2000);
+  // 从 A 页尝试开新标签页（没有用户手势，看 Via 拦不拦）
+  if (TAB === 'A' && q.get('open') === '1') {
+    setTimeout(function () {
+      try {
+        var w = window.open(location.pathname + '?tab=B&parent=1', '_blank');
+        log('window.open => ' + (w ? 'ok' : 'null(被拦截)'));
+      } catch (e) { log('window.open 异常 ' + e.message); }
+    }, 2500);
+  }
+})();
+</script>
+</body>
+</html>

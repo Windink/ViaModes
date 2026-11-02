@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Via Video Player E2E</title>
+<style>
+    body { font-family: system-ui, sans-serif; margin: 20px; }
+    video { width: 320px; max-width: 100%; background: #000; display: block; margin: 8px 0 24px; }
+    h2 { font-size: 16px; }
+    #log { font-size: 12px; color: #555; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h2>MP4（DOM 嗅探）</h2>
+<video id="v1" controls preload="metadata" src="/e2e/flower.mp4"></video>
+
+<h2>HLS m3u8（XHR/fetch 嗅探）</h2>
+<video id="v2" controls muted></video>
+<div id="log"></div>
+
+<script src="../dist/via-video-player.user.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+<script>
+    var log = function (s) { document.getElementById('log').textContent += s + '\n'; };
+    if (window.Hls && Hls.isSupported()) {
+        var h = new Hls({});
+        var tries = 0;
+        var src = 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8';
+        h.on(Hls.Events.MANIFEST_PARSED, function () { log('hls.js ready levels=' + h.levels.length); });
+        h.on(Hls.Events.ERROR, function (e, d) {
+            if (!d.fatal) return;
+            log('hls fatal: ' + d.type + '/' + d.details);
+            if (d.type === Hls.ErrorTypes.NETWORK_ERROR && ++tries <= 3) {
+                setTimeout(function () { h.loadSource(src); }, 800 * tries);
+            }
+        });
+        h.attachMedia(document.getElementById('v2'));
+        h.loadSource(src);
+        window.__demoHls = h;
+    } else {
+        log('hls.js not supported');
+    }
+</script>
+</body>
+</html>

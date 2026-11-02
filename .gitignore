@@ -1,0 +1,9 @@
+# WorkBuddy 本地项目数据（不应公开/提交）
+.workbuddy/
+
+# 依赖
+node_modules/
+
+# 日志
+*.log
+.DS_Store

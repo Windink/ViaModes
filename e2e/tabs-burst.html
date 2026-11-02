@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tabs-burst</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.6 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 24px/1.2 sans-serif; color:#fff; margin:2px 0 8px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<div id="tag">BURST</div>
+<div id="log"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var N = Number(q.get('n') || 10);
+  var GAP = Number(q.get('gap') || 1500);
+  var logEl = document.getElementById('log');
+  function log(s) {
+    var d = new Date();
+    var line = '[' + d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0') + '] ' + s;
+    var div = document.createElement('div');
+    div.textContent = line;
+    logEl.appendChild(div);
+    document.title = s;      // 无截图时靠 dumpsys 也读不到，主要给截图用
+  }
+  // 子页必须立刻止步，否则每个新标签页都会再开一轮，标签数指数爆炸
+  if (q.get('child')) {
+    log('child#' + q.get('child') + ' 空闲（不再派生）');
+    return;
+  }
+
+  log('boot n=' + N + ' gap=' + GAP);
+
+  var opened = 0;
+  var i = 0;
+  var timer = setInterval(function () {
+    i++;
+    if (i > N) { clearInterval(timer); log('BURST DONE opened=' + opened + '/' + N); return; }
+    var url = location.pathname + '?child=' + i + '&_=' + Date.now();
+    var w = null;
+    try { w = window.open(url, '_blank'); } catch (e) { log('#' + i + ' 异常 ' + e.message); return; }
+    if (w) opened++;
+    log('#' + i + ' => ' + (w ? 'ok' : 'null(被拦)') + ' 累计=' + opened);
+  }, GAP);
+})();
+</script>
+</body>
+</html>

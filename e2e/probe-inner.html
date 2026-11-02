@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>probe-inner</title>
+<style>body{margin:0;background:#151515;color:#9ae6b4;font:12px/1.5 ui-monospace,monospace;padding:6px;word-break:break-all}</style>
+</head>
+<body>
+<div id="o">inner probing…</div>
+<script>
+// Via 不会往 iframe 里注入已安装的用户脚本，所以这里加载的是我们自己的构建。
+// 注意：Via 里 document.write 插入的 script 不会执行，必须用 appendChild 异步加载。
+// 用全新路径破缓存（Via 按路径缓存，?t= 和 no-store 都拦不住）。
+(function () {
+  // 脚本在 iframe 里可能因为环境差异静默失败，把错误兜出来
+  window.addEventListener('error', function (e) {
+    window.__innerErr = (e.message || '') + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || 0);
+  }, true);
+  var s = document.createElement('script');
+  s.src = '../dist/vv-' + Date.now() + '.js';
+  s.onload = function () { window.__innerLoaded = 'ok'; };
+  s.onerror = function () { window.__innerLoaded = 'error'; };
+  document.head.appendChild(s);
+})();
+</script>
+<script>
+setTimeout(function () {
+  var d = window.__vv;
+  var keys = d ? Object.keys(d) : [];
+  document.getElementById('o').textContent = 'inner __vv: ' +
+    (d ? 'YES ' + keys.length + ' 个接口' : 'NO') +
+    ' | lastTeardown=' + (d && typeof d.lastTeardown === 'function' ? 'YES' : 'NO') +
+    ' | tornDown=' + (d && typeof d.tornDown === 'function' ? 'YES' : 'NO') +
+    ' | load=' + (window.__innerLoaded || 'pending') +
+    ' | err=' + (window.__innerErr || 'none') +
+    ' | rs=' + document.readyState;
+}, 2500);
+</script>
+</body>
+</html>

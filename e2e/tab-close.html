@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>tab-close</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.55 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 26px/1.2 sans-serif; color:#fff; }
+  #sub { color:#7fd1ff; margin:4px 0 10px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .warn { color:#ffb86b; }
+  .ok { color:#7ee787; }
+</style>
+</head>
+<body>
+<div id="tag">?</div>
+<div id="sub"></div>
+<div id="log"></div>
+<script>
+// 专测「用户直接关掉正在播放的标签页」这条路径。
+// host 只负责开窗、不起播；child 起播后自己 window.close()。
+// 这样 codec 时间线上只有 child 一次 configure，close 之后是否 destruct 一眼可判。
+//
+// 两个 Via 专有坑（踩过，必须记住）：
+//   1. document.write 插入的 script 不会执行 —— 必须 createElement + appendChild；
+//   2. 按 URL 路径缓存子资源，?t= 和 Cache-Control: no-store 都拦不住 —— 每次用新路径 /dist/vv-<时间戳>.js。
+(function () {
+  var q = new URLSearchParams(location.search);
+  var ROLE = q.get('role') || 'host';
+  var MODE = q.get('mode') || 'mp4';
+  var OPEN_AT = Number(q.get('openAt') || 4000);   // host 多久后开子页
+  var PLAY_AT = Number(q.get('playAt') || 2500);   // child 多久后起播
+  var CLOSE_AT = Number(q.get('closeAt') || 9000); // child 起播后多久关掉自己
+  var logEl = document.getElementById('log');
+  var sub = document.getElementById('sub');
+
+  document.getElementById('tag').textContent = ROLE === 'host' ? 'HOST' : 'CHILD';
+
+  function log(s, cls) {
+    var div = document.createElement('div');
+    var t = new Date().toTimeString().slice(0, 8);
+    div.innerHTML = (cls ? '<span class="' + cls + '">' : '<span>') + t + ' ' + s + '</span>';
+    logEl.appendChild(div);
+    document.title = (ROLE === 'host' ? 'HOST ' : 'CHILD ') + s;
+    // 子页随时可能被关掉，日志留不住；同步写进 localStorage，host 才能替它作证
+    try {
+      var key = 'vv_close_log_' + ROLE;
+      var arr = [];
+      try { arr = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e0) {}
+      arr.push(t + ' ' + s.replace(/<[^>]+>/g, ''));
+      if (arr.length > 40) arr = arr.slice(-40);
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch (e1) {}
+  }
+
+  function tick() {
+    var v = document.querySelector('.vv-player-video');
+    var dbg = window.__vv || {};
+    sub.textContent = 'hidden=' + document.hidden + ' vis=' + document.visibilityState +
+      ' pool=' + (typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : '-') +
+      ' root=' + !!document.getElementById('vv-player-root') +
+      ' rs=' + (v ? v.readyState : '-') +
+      ' t=' + (v ? (+v.currentTime).toFixed(1) : '-');
+    requestAnimationFrame(tick);
+  }
+  tick();
+
+  function mediaState() {
+    var vs = document.querySelectorAll('video,audio');
+    var out = [];
+    for (var i = 0; i < vs.length; i++) {
+      out.push({
+        hasSrc: vs[i].hasAttribute('src'),
+        srcLen: (vs[i].currentSrc || vs[i].src || '').length,
+        paused: vs[i].paused,
+        rs: vs[i].readyState
+      });
+    }
+    var dbg = window.__vv || {};
+    return {
+      media: out,
+      pool: typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : -1,
+      root: !!document.getElementById('vv-player-root')
+    };
+  }
+
+  function mark(ev) {
+    try {
+      var arr = [];
+      try { arr = JSON.parse(localStorage.getItem('vv_close_probe') || '[]'); } catch (e0) {}
+      var dbg = window.__vv || {};
+      arr.push({
+        ev: ev,
+        at: new Date().toISOString().slice(11, 23),
+        state: mediaState(),
+        // 非 0 说明我们的 vvHardTeardown 在本次事件里跑过了
+        teardownAt: typeof dbg.lastTeardown === 'function' ? dbg.lastTeardown() : -1,
+        torn: typeof dbg.tornDown === 'function' ? dbg.tornDown() : null
+      });
+      localStorage.setItem('vv_close_probe', JSON.stringify(arr));
+    } catch (e) {}
+  }
+
+  // 探针必须晚于产品的监听注册（产品挂在 DOMContentLoaded），否则读到的全是
+  // "清理之前"的状态，结论会完全反过来。
+  function installProbes() {
+    ['pagehide', 'beforeunload', 'unload', 'freeze'].forEach(function (n) {
+      window.addEventListener(n, function (ev) {
+        log('事件 ' + n + (ev && ev.persisted ? ' persisted=1' : '') + ' | ' + JSON.stringify(mediaState()), 'warn');
+        mark(n + (ev && ev.persisted ? ' persisted=1' : ''));
+      });
+    });
+  }
+
+  function item() {
+    return {
+      url: MODE === 'hls'
+        ? 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'
+        : location.origin + '/e2e/flower.mp4',
+      type: MODE === 'hls' ? 'HLS' : 'MP4',
+      name: 'close-test-' + MODE
+    };
+  }
+
+  function start() {
+    log('boot role=' + ROLE + ' mode=' + MODE);
+    // 确认跑的是哪份脚本：Via 之前会注入已安装的旧版，接口数能直接看出新旧
+    var keys = Object.keys(window.__vv || {});
+    log('脚本接口 ' + keys.length + ' 个, lastTeardown=' +
+        (typeof (window.__vv || {}).lastTeardown === 'function' ? 'YES' : 'NO'), 'ok');
+
+    if (ROLE === 'host') {
+      try {
+        localStorage.removeItem('vv_close_probe');
+        localStorage.removeItem('vv_close_before');
+        localStorage.removeItem('vv_close_mid');
+        localStorage.removeItem('vv_close_log_child');
+      } catch (e0) {}
+      setTimeout(function () {
+        var url = location.pathname + '?vvdebug=1&role=child&mode=' + MODE +
+          '&playAt=' + PLAY_AT + '&closeAt=' + CLOSE_AT + '&a=' + Date.now();
+        var w = null;
+        try { w = window.open(url, '_blank'); } catch (e) { log('open 抛错 ' + e.message, 'warn'); }
+        log('window.open => ' + (w ? 'ok' : 'null(被拦)'), w ? 'ok' : 'warn');
+
+        var lastProbe = '';
+        var lastBefore = '';
+        var lastMid = '';
+        var lastChildLine = '';
+        var backAt = 0;
+        var iv = setInterval(function () {
+          try {
+            var cl = JSON.parse(localStorage.getItem('vv_close_log_child') || '[]');
+            var lastC = cl.length ? cl[cl.length - 1] : '';
+            if (lastC && lastC !== lastChildLine) { lastChildLine = lastC; log('子页 › ' + lastC, 'ok'); }
+          } catch (eC) {}
+
+          var b = '';
+          try { b = localStorage.getItem('vv_close_before') || ''; } catch (eB) {}
+          if (b && b !== lastBefore) { lastBefore = b; log('关之前快照 ' + b, 'ok'); }
+
+          var mid = '';
+          try { mid = localStorage.getItem('vv_close_mid') || ''; } catch (eM) {}
+          if (mid && mid !== lastMid) { lastMid = mid; log('播放中快照 ' + mid, 'ok'); }
+
+          var p = '';
+          try { p = localStorage.getItem('vv_close_probe') || ''; } catch (eP) {}
+          if (p && p !== lastProbe) {
+            lastProbe = p;
+            var arr = [];
+            try { arr = JSON.parse(p); } catch (e2) { arr = []; }
+            arr.forEach(function (o) {
+              log('子页临终 [' + o.at + '] ' + o.ev, 'warn');
+              log('  清理后 media=' + JSON.stringify(o.state.media) +
+                  ' pool=' + o.state.pool + ' root=' + o.state.root +
+                  ' teardownAt=' + (o.teardownAt || 0) + ' torn=' + o.torn, 'ok');
+            });
+          }
+
+          if (!document.hidden && !backAt) {
+            backAt = Date.now();
+            log('回到前台（子页已关）', 'ok');
+          }
+          if (backAt && Date.now() - backAt > 6000) clearInterval(iv);
+        }, 500);
+      }, OPEN_AT);
+    } else {
+      setTimeout(function () {
+        try { window.__vv.open(item()); log('起播 ' + MODE, 'ok'); }
+        catch (e) { log('起播失败 ' + e.message, 'warn'); }
+      }, PLAY_AT);
+
+      // 播放中的快照：证明元素确实起来过，避免"起播失败所以没有元素"被误读成"清理干净"
+      setTimeout(function () {
+        try {
+          localStorage.setItem('vv_close_mid', JSON.stringify({
+            at: new Date().toISOString().slice(11, 23), state: mediaState()
+          }));
+        } catch (e0) {}
+      }, PLAY_AT + 5000);
+
+      setTimeout(function () {
+        log('准备 window.close() 关掉本标签页', 'warn');
+        // 关之前留一张快照：区分"起播了没"和"我们清不干净"这两件事
+        try {
+          localStorage.setItem('vv_close_before', JSON.stringify({
+            at: new Date().toISOString().slice(11, 23), state: mediaState()
+          }));
+        } catch (e0) {}
+        try { window.close(); } catch (e) { log('close 被拒 ' + e.message, 'warn'); }
+      }, PLAY_AT + CLOSE_AT);
+    }
+  }
+
+  // 自己加载构建：Via 停用旧脚本后，页面上不会再有注入的 __vv。
+  function boot() {
+    var tries = 0;
+    (function wait() {
+      if (window.__vv && typeof window.__vv.open === 'function') {
+        if (document.readyState === 'complete') setTimeout(installProbes, 0);
+        else window.addEventListener('load', installProbes);
+        start();
+      } else if (tries++ > 50) {
+        log('FATAL 等不到 __vv（脚本没加载或被拦）', 'warn');
+      } else {
+        setTimeout(wait, 100);
+      }
+    })();
+  }
+
+  var s = document.createElement('script');
+  s.src = '../dist/vv-' + Date.now() + '.js';
+  s.onload = boot;
+  s.onerror = function () { log('脚本加载失败', 'warn'); boot(); };
+  document.head.appendChild(s);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>multitab</title>
+<style>
+  body { margin:0; background:#0d0d0d; color:#e8e8e8; font:12px/1.55 ui-monospace,Menlo,monospace; padding:10px; }
+  #tag { font:700 26px/1.2 sans-serif; color:#fff; margin:2px 0 8px; }
+  #log { white-space:pre-wrap; word-break:break-all; }
+  .k { color:#7fd1ff; }
+  .warn { color:#ffb86b; }
+  .ok { color:#7ee787; }
+</style>
+</head>
+<body>
+<div id="tag">?</div>
+<div id="log"></div>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var ROLE = q.get('role') || 'host';
+  var OPEN_GUEST = q.get('guest') === '1';
+  var OPEN_AT = Number(q.get('openAt') || 6000);      // host 开 guest 的时刻
+  var PLAY_AT = Number(q.get('playAt') || 2000);      // 自己起播的时刻
+  var TAG = q.get('tag') || (ROLE === 'host' ? 'A' : 'B');
+  var ROUNDS = Number(q.get('rounds') || 1);
+  var logEl = document.getElementById('log');
+  document.getElementById('tag').textContent = (ROLE === 'host' ? 'HOST ' : 'GUEST ') + TAG;
+
+  function log(s, cls) {
+    var d = new Date();
+    var span = cls ? '<span class="' + cls + '">' + s + '</span>' : s;
+    el_insert('[' + d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0') + '] ' + span);
+    document.title = TAG + ' ' + s.replace(/<[^>]+>/g, '');
+  }
+  function el_insert(html) {
+    var div = document.createElement('div');
+    div.innerHTML = html;
+    logEl.appendChild(div);
+    if (logEl.childNodes.length > 60) logEl.removeChild(logEl.firstChild);
+  }
+
+  // 供另一页通过 opener / window.open 句柄读取自身状态
+  window.__probe = function () {
+    var v = document.querySelector('.vv-player-video');
+    var dbg = window.__vv || {};
+    return {
+      t: TAG,
+      hidden: document.hidden,
+      vis: document.visibilityState,
+      focus: document.hasFocus ? document.hasFocus() : null,
+      root: !!document.getElementById('vv-player-root'),
+      pool: typeof dbg.hlsPool === 'function' ? dbg.hlsPool() : -1,
+      srcLen: typeof dbg.videoSrcLen === 'function' ? dbg.videoSrcLen() : -1,
+      paused: v ? v.paused : null,
+      rs: v ? v.readyState : null,
+      cur: v ? +v.currentTime.toFixed(1) : null,
+      w: v ? v.videoWidth : null,
+      h: v ? v.videoHeight : null
+    };
+  };
+  function brief(o) {
+    if (!o) return '(读不到)';
+    return 'hidden=' + o.hidden + ' pool=' + o.pool + ' src=' + o.srcLen + ' root=' + o.root +
+           ' rs=' + o.rs + ' t=' + o.cur + ' ' + (o.w || 0) + 'x' + (o.h || 0);
+  }
+
+  var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  function item() {
+    var mode = q.get('mode') || 'hls';
+    return mode === 'hls'
+      ? { url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', type: 'HLS', name: 'tab-' + TAG }
+      : { url: location.origin + '/e2e/flower.mp4', type: 'MP4', name: 'tab-' + TAG };
+  }
+
+  log('boot role=' + ROLE + ' tag=' + TAG + ' hidden=' + document.hidden + ' vis=' + document.visibilityState + ' vv=' + !!window.__vv);
+
+  document.addEventListener('visibilitychange', function () {
+    log('visibilitychange → hidden=' + document.hidden, 'warn');
+  });
+  window.addEventListener('focus', function () { log('focus', 'ok'); });
+  window.addEventListener('blur', function () { log('blur', 'warn'); });
+
+  var tickN = 0;
+  setInterval(function () {
+    tickN++;
+    var s = 'self ' + brief(window.__probe());
+    if (window.opener && !window.opener.closed) {
+      var ho = null;
+      try { ho = window.opener.__probe ? window.opener.__probe() : null; } catch (e) { ho = null; }
+      s += ' || host ' + brief(ho);
+    }
+    log(s);
+  }, 2500);
+
+  (async function () {
+    await wait(1200);
+    if (!window.__vv) { log('FATAL: __vv 缺失，需要 ?vvdebug=1', 'warn'); return; }
+
+    if (ROLE === 'host' && OPEN_GUEST) {
+      await wait(OPEN_AT - 1200);
+      var url = location.pathname + '?vvdebug=1&role=guest&tag=B&mode=' + (q.get('mode') || 'hls') +
+                '&playAt=' + (q.get('guestPlayAt') || 2000) + '&_=' + Date.now();
+      log('window.open guest → ' + url.slice(0, 80));
+      var w = window.open(url, '_blank');
+      log('window.open => ' + (w ? 'ok' : 'null(被拦)'), w ? 'ok' : 'warn');
+    }
+
+    await wait(Math.max(0, PLAY_AT - (ROLE === 'host' ? OPEN_AT : 0) - 1200));
+    for (var i = 1; i <= ROUNDS; i++) {
+      log('R' + i + ' open', 'ok');
+      try { window.__vv.open(item()); } catch (e) { log('open 异常 ' + e.message, 'warn'); }
+      await wait(Number(q.get('playMs') || 9000));
+      log('R' + i + ' 播放中 ' + brief(window.__probe()));
+      if (q.get('autoClose') === '1') {
+        log('R' + i + ' close', 'warn');
+        try { window.__vv.close(); } catch (e) { log('close 异常 ' + e.message, 'warn'); }
+        await wait(3500);
+        log('R' + i + ' 关闭后 ' + brief(window.__probe()));
+      }
+    }
+    log('DONE');
+  })();
+})();
+</script>
+</body>
+</html>
