@@ -4,7 +4,7 @@
 // @namespace    viamodes.local
 // @version      0.1.3
 // @author       ViaModes
-// @description  网页视频嗅探 + 夸克风格全屏播放器：悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
+// @description  网页视频嗅探 + 全屏播放器：悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
 // @description:en  Sniff web videos and play with a Quark-style fullscreen player (gestures, speed, resume, m3u8, next-episode, download)
 // @match        http://*/*
 // @match        https://*/*
@@ -3991,7 +3991,7 @@ function vvSaveText(name, text, mime) {
 }
 
 // 生成 Android intent:// 链接：把播放交给「另一个 App」的独立进程去解码。
-// 这就是夸克那类浏览器能扛多路的关键——播放器在别的进程，
+// 这就是那类浏览器能扛多路的关键——播放器在别的进程，
 // 有自己的 MediaCodec 配额，一个崩了也不牵连页面。
 // 脚本在 Via 的 WebView 里没有起 Activity 的权限，只能"请求"系统去起，
 // 所以能不能成，取决于 Via 是否放行外部应用跳转。

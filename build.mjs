@@ -12,7 +12,7 @@ const HEADER = `// ==UserScript==
 // @namespace    viamodes.local
 // @version      0.1.3
 // @author       ViaModes
-// @description  网页视频嗅探 + 夸克风格全屏播放器：悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
+// @description  网页视频嗅探 + 全屏播放器：悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
 // @description:en  Sniff web videos and play with a Quark-style fullscreen player (gestures, speed, resume, m3u8, next-episode, download)
 // @match        http://*/*
 // @match        https://*/*
