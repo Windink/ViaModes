@@ -144,15 +144,38 @@ function vvApplyVolume(pct) {
     } catch (e) {}
 }
 
+// 通用提示：屏幕上居中的胶囊（双击快进、横滑 seek 用这个）
 function vvShowSeek(text) {
     try {
+        if (!SEEKTIP) return;
+        SEEKTIP.classList.remove('scrub');
+        SEEKTIP.style.left = '';
         SEEKTIP.innerHTML = vvEscape(text);
         SEEKTIP.classList.add('on');
     } catch (e) {}
 }
 
+// 拖动进度条时的气泡：吸附在拇指正上方而不是画面中央，这样视线不用离开进度条
+function vvShowSeekAt(text, pct) {
+    try {
+        if (!SEEKTIP || !ROOT || !CSPROG) return;
+        var rr = ROOT.getBoundingClientRect();
+        var pr = CSPROG.getBoundingClientRect();
+        var cx = (pr.left - rr.left) + Math.max(0, Math.min(1, pct)) * pr.width;
+        // 夹紧到距边 46px：气泡比拇指宽，贴边时会溢出到屏幕外
+        cx = Math.max(46, Math.min(Math.max(46, rr.width - 46), cx));
+        SEEKTIP.innerHTML = vvEscape(text);
+        SEEKTIP.style.left = cx + 'px';
+        SEEKTIP.classList.add('scrub', 'on');
+    } catch (e) {}
+}
+
 function vvHideSeek() {
-    try { SEEKTIP.classList.remove('on'); } catch (e) {}
+    try {
+        if (!SEEKTIP) return;
+        SEEKTIP.classList.remove('on', 'scrub');
+        SEEKTIP.style.left = '';
+    } catch (e) {}
 }
 
 function vvShowGes(text) {
@@ -359,6 +382,7 @@ function vvGesCancel(e) {
         vvG.mode = 'none';
         vvG.gtgt = null;
         vvG.progDrag = false;
+        try { if (CSPROG) CSPROG.classList.remove('dragging'); } catch (eD) {}
         vvHideSeek();
         vvHideGes();
     } catch (e) {}
@@ -406,6 +430,7 @@ function vvInvokeDouble(e) {
 
 function vvProgCommit() {
     try {
+        if (CSPROG) CSPROG.classList.remove('dragging');
         if (vvG.progDrag && typeof vvG.progT === 'number' && VID && VID.duration) vvSeekTo(vvG.progT);
     } catch (e) {}
     vvG.progDrag = false;
@@ -476,8 +501,10 @@ function vvProgDrag(x) {
         var t = pct * dur;
         vvG.progT = t;
         CSCUR.style.width = (pct * 100) + '%';
+        // 位置必须继续用 left 百分比表达（不改成 transform），拖动中也不会被 vvOnTime 回写覆盖
         CSPROGDOT.style.left = (pct * 100) + '%';
-        vvShowSeek(vvFmtTime(t) + ' / ' + vvFmtTime(dur));
+        CSPROG.classList.add('dragging');
+        vvShowSeekAt(vvFmtTime(t) + ' / ' + vvFmtTime(dur), pct);
     } catch (e) {}
 }
 
@@ -650,16 +677,30 @@ function vvHideSheet() {
     } catch (e) {}
 }
 
+// 菜单协议：{group:'标题'} 表头；{label, sub?, icon?, on?, switch?, act}
+// 选中态由 .on + 勾选图标表达，不再往 label 里拼 "  ✓"；布尔项用开关而不是「：开/关」文案。
 function vvSheetShow(items) {
     try {
         var s = vvGetSheet();
         if (!s) return;
         s.innerHTML = '';
         items.forEach(function (it) {
-            var row = vvEl('div', 'vv-sheet-item' + (it.on ? ' on' : ''));
-            row.innerHTML = vvEscape(it.label);
+            if (!it) return;
+            if (it.group) { s.appendChild(vvEl('div', 'vv-sheet-group', vvEscape(it.group))); return; }
+            var row = vvEl('div', 'vv-sheet-item' + (it.on ? ' on' : '') + (it.off ? ' off' : ''));
+            // 图标槽位恒定占位：有的行有图标、有的没有，不留空槽会让标题栏左右参差
+            row.innerHTML =
+                '<span class="vv-sheet-ico">' + (it.icon ? vvIcon(it.icon, 18) : '') + '</span>' +
+                '<span class="vv-sheet-txt">' +
+                    '<span class="vv-sheet-label">' + vvEscape(it.label) + '</span>' +
+                    (it.sub ? '<span class="vv-sheet-sub">' + vvEscape(it.sub) + '</span>' : '') +
+                '</span>' +
+                (it.switch
+                    ? '<span class="vv-switch" role="switch" aria-checked="' + (it.on ? 'true' : 'false') + '"></span>'
+                    : (it.on ? '<span class="vv-sheet-check">' + vvIcon('check', 16) + '</span>' : ''));
             row.addEventListener('click', function (e) {
                 e.stopPropagation();
+                if (!it.act) return;
                 var keep = it.act();
                 if (!keep) vvHideSheet();
             });
@@ -673,15 +714,16 @@ function vvSheetShow(items) {
 function vvSpeedMenu() {
     var opts = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
     var cur = VV.active ? VV.active.speed : 1;
-    var items = opts.map(function (o) {
-        return {
-            label: (o === 1 ? '正常' : o + 'x') + (o === cur ? '  ✓' : ''),
+    var items = [{ group: '播放速度' }];
+    opts.forEach(function (o) {
+        items.push({
+            label: o === 1 ? '正常' : o + 'x',
             on: o === cur,
             act: function () {
                 vvSetSpeed(o);
                 return false;
             }
-        };
+        });
     });
     vvSheetShow(items);
 }
@@ -702,18 +744,41 @@ function vvAudioLabel(tr, idx) {
     } catch (e) { return '音轨' + (idx + 1); }
 }
 
+// 倍速 chip 只表达倍速本身。以前把画质也拼进来（"1.5x · 自动·200P"），
+// 12px 字号下三个信息挤在一枚胶囊里，扫一眼读不出来；画质现在有独立入口。
 function vvUpdateSpeedChip() {
     try {
         var a = VV.active;
         var chip = document.getElementById('vv-speed-chip');
         if (!a || !chip) return;
-        var s = a.speed && a.speed !== 1 ? (a.speed + 'x') : '倍速';
-        var q = '';
-        if (a.levels && a.levels.length > 1) {
-            if (a.qIndex === undefined) q = a.qAutoHeight ? ('自动·' + a.qAutoHeight + 'P') : '自动';
-            else q = (a.levels[a.qIndex] && a.levels[a.qIndex].height) ? (a.levels[a.qIndex].height + 'P') : ('线路' + (a.qIndex + 1));
+        var fast = !!(a.speed && a.speed !== 1);
+        chip.textContent = fast ? (a.speed + 'x') : '倍速';
+        chip.classList.toggle('on', fast);
+        chip.setAttribute('aria-pressed', fast ? 'true' : 'false');
+        vvUpdateQualityChip();
+    } catch (e) {}
+}
+
+function vvUpdateQualityChip() {
+    try {
+        var a = VV.active;
+        var chip = document.getElementById('vv-quality-chip');
+        if (!a || !chip) return;
+        var levels = a.levels || [];
+        if (levels.length < 2) {
+            chip.classList.remove('show', 'on');
+            chip.textContent = '';
+            return;
         }
-        chip.innerHTML = vvEscape(s + (q ? ' · ' + q : ''));
+        var manual = a.qIndex !== undefined;
+        var txt;
+        if (!manual) txt = '自动';
+        else if (levels[a.qIndex] && levels[a.qIndex].height) txt = levels[a.qIndex].height + 'P';
+        else txt = '线路' + (a.qIndex + 1);
+        chip.textContent = txt;
+        chip.classList.add('show');
+        // 自动档不点亮：只有"用户主动选过档位"才算非默认状态
+        chip.classList.toggle('on', manual);
     } catch (e) {}
 }
 
@@ -894,8 +959,11 @@ function vvMenuSheet() {
     if (!act) return;
     var dur = VID.duration || 0;
     var items = [];
+    items.push({ group: '播放' });
     items.push({
-        label: '标记片头（跳过当前位置之前）',
+        label: '标记片头',
+        sub: '跳过当前位置之前',
+        icon: 'back',
         on: act.skipS > 0,
         act: function () {
             act.skipS = Math.max(0, (VID.currentTime || 0) - 0.2);
@@ -906,7 +974,9 @@ function vvMenuSheet() {
     });
     if (dur > 0) {
         items.push({
-            label: '标记片尾（在本位置结束）',
+            label: '标记片尾',
+            sub: '播到当前位置结束',
+            icon: 'next',
             on: act.skipE > 0,
             act: function () {
                 act.skipE = Math.max(0, dur - (VID.currentTime || 0) - 0.2);
@@ -919,6 +989,7 @@ function vvMenuSheet() {
     if (act.skipS > 0 || act.skipE > 0) {
         items.push({
             label: '清除片头片尾标记',
+            icon: 'close',
             act: function () {
                 act.skipS = 0;
                 act.skipE = 0;
@@ -929,16 +1000,29 @@ function vvMenuSheet() {
         });
     }
     items.push({
-        label: '多页并行播放：' + (VV.cfg.multiPlay ? '开' : '关'),
-        on: VV.cfg.multiPlay,
+        label: '从头播放',
+        icon: 'play',
+        act: function () {
+            vvSeekTo(0);
+            return false;
+        }
+    });
+    items.push({ group: '设置' });
+    // 布尔项改用开关控件：状态由控件本身表达，不再往标题里拼「：开/关」
+    items.push({
+        label: '多页并行播放',
+        sub: '同时播多个页面时自动压低档位与缓冲',
+        switch: true,
+        on: !!VV.cfg.multiPlay,
         act: function () {
             vvToggleMultiPlay();
             return false;
         }
     });
     items.push({
-        label: '连播（自动下一集）：' + (VV.cfg.autoplayNext ? '开' : '关'),
-        on: VV.cfg.autoplayNext,
+        label: '连播（自动下一集）',
+        switch: true,
+        on: !!VV.cfg.autoplayNext,
         act: function () {
             VV.cfg.autoplayNext = !VV.cfg.autoplayNext;
             vvSet('autoplayNext', VV.cfg.autoplayNext);
@@ -946,9 +1030,13 @@ function vvMenuSheet() {
             return false;
         }
     });
+    // 「画面」组按实际内容决定是否出现：直链 mp4 既没有档位也没有音轨，
+    // 先推表头会留下一个空分组
+    var visual = [];
     if (act.hls && act.levels && act.levels.length > 1) {
-        items.push({
+        visual.push({
             label: '画质：' + (act.qIndex === undefined ? (act.qAutoHeight ? '自动·' + act.qAutoHeight + 'P' : '自动') : (act.levels[act.qIndex].height ? act.levels[act.qIndex].height + 'P' : ('线路' + (act.qIndex + 1)))),
+            icon: 'gear',
             act: function () {
                 vvQualityMenu();
                 return true;
@@ -957,8 +1045,9 @@ function vvMenuSheet() {
     }
     if (act.hls && act.audioTracks && act.audioTracks.length > 1) {
         var ai = act.hlsInst && typeof act.hlsInst.audioTrack === 'number' ? act.hlsInst.audioTrack : act.audioIndex;
-        items.push({
+        visual.push({
             label: '音轨：' + vvAudioLabel(act.audioTracks[ai] || act.audioTracks[0], ai),
+            icon: 'gear',
             act: function () {
                 vvAudioMenu();
                 return true;
@@ -968,8 +1057,10 @@ function vvMenuSheet() {
     if (act.item && act.item.type === 'HLS') {
         var eng = VV.cfg.hlsEngine || 'auto';
         var engLabel = eng === 'native' ? '系统原生' : (eng === 'hlsjs' ? 'hls.js' : '自动');
-        items.push({
-            label: 'HLS 内核：' + engLabel + '（点按切换）',
+        visual.push({
+            label: 'HLS 内核：' + engLabel,
+            sub: '点按切换',
+            icon: 'gear',
             act: function () {
                 var next = eng === 'auto' ? 'native' : (eng === 'native' ? 'hlsjs' : 'auto');
                 if (next === 'native' && !vvCanNativeHls()) {
@@ -995,8 +1086,49 @@ function vvMenuSheet() {
             }
         });
     }
+    if (visual.length) {
+        items.push({ group: '画面' });
+        items = items.concat(visual);
+    }
+    items.push({ group: '工具' });
+    items.push({
+        label: '复制链接',
+        icon: 'link',
+        act: function () {
+            if (act.item) { vvCopy(act.item.url); vvToast('已复制链接'); }
+            return false;
+        }
+    });
+    items.push({
+        label: '下载此视频',
+        icon: 'dl',
+        act: function () {
+            vvDownloadItem(act.item);
+            return false;
+        }
+    });
+    items.push({
+        label: '导出 / 复制链接',
+        sub: '生成带 Referer 的 .m3u，外部播放器可直接打开',
+        icon: 'link',
+        act: function () {
+            vvShareOpen(act.item);
+            return false;
+        }
+    });
+    items.push({
+        label: '用外部播放器播放',
+        sub: '独立进程解码，可和多页播放并行',
+        icon: 'play',
+        act: function () {
+            var ok = vvOpenExternal(act.item);
+            vvToast(ok ? '已唤起系统选择器，选 VLC / MX 等即可' : '无法唤起外部应用，请用「导出 / 复制链接」导出 .m3u', true);
+            return false;
+        }
+    });
     items.push({
         label: '复制播放诊断',
+        icon: 'gear',
         act: function () {
             var txt = vvDiagText();
             vvCopy(txt);
@@ -1008,38 +1140,11 @@ function vvMenuSheet() {
         }
     });
     items.push({
-        label: '从头播放',
-        act: function () {
-            vvSeekTo(0);
-            return false;
-        }
-    });
-    items.push({
-        label: '下载此视频',
-        act: function () {
-            vvDownloadItem(act.item);
-            return false;
-        }
-    });
-    items.push({
-        label: '重建播放实例（解码失败/卡死时用）',
+        label: '重建播放实例',
+        sub: '解码失败或卡死时重建，进度保留',
+        icon: 'gear',
         act: function () {
             vvRebuildMedia();
-            return false;
-        }
-    });
-    items.push({
-        label: '用外部播放器播放（独立进程，可并行）',
-        act: function () {
-            var ok = vvOpenExternal(act.item);
-            vvToast(ok ? '已唤起系统选择器，选 VLC / MX 等即可' : '无法唤起外部应用，请用「外部播放器 / 复制链接」导出 .m3u', true);
-            return false;
-        }
-    });
-    items.push({
-        label: '外部播放器 / 复制链接',
-        act: function () {
-            vvShareOpen(act.item);
             return false;
         }
     });
@@ -1077,7 +1182,8 @@ function vvQualityMenu() {
         var act = VV.active;
         if (!act || !act.levels) return;
         var items = [{
-            label: '自动（自适应）' + (act.qIndex === undefined ? '  ✓' : ''),
+            label: '自动（自适应）',
+            sub: '按带宽在档位间平滑切换',
             on: act.qIndex === undefined,
             act: function () {
                 // 用 nextLevel 而不是 currentLevel：后者会立刻 flush 缓冲重拉，
@@ -1092,7 +1198,7 @@ function vvQualityMenu() {
         }];
         act.levels.forEach(function (lv, idx) {
             items.push({
-                label: vvLevelLabel(lv, idx) + (act.qIndex === idx ? '  ✓' : ''),
+                label: vvLevelLabel(lv, idx),
                 on: act.qIndex === idx,
                 act: function () {
                     try { act.hlsInst.nextLevel = idx; } catch (e2) {}
@@ -1115,7 +1221,7 @@ function vvAudioMenu() {
         var cur = act.hlsInst && typeof act.hlsInst.audioTrack === 'number' ? act.hlsInst.audioTrack : act.audioIndex;
         var items = act.audioTracks.map(function (tr, idx) {
             return {
-                label: vvAudioLabel(tr, idx) + (cur === idx ? '  ✓' : ''),
+                label: vvAudioLabel(tr, idx),
                 on: cur === idx,
                 act: function () {
                     try { act.hlsInst.audioTrack = idx; } catch (eA) {}

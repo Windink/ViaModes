@@ -368,8 +368,7 @@ try {
         const root = document.querySelector('.vv-player-root');
         if (!root) return { skip: true };
         const btns = root.querySelectorAll('.vv-cs-bottom .vv-csbtn');
-        let moreBtn = null;
-        for (const b of btns) if (b.textContent.indexOf('⋯') >= 0) moreBtn = b;
+        const moreBtn = root.querySelector('.vv-cs-bottom [data-act="more"]');
         if (!moreBtn) return { skip: true, reason: '没有更多按钮' };
         moreBtn.click();
         await new Promise((r2) => setTimeout(r2, 300));

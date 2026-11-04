@@ -187,6 +187,40 @@ function vvEl(tag, cls, html) {
     return d;
 }
 
+// 统一图标语言：24x24 viewBox、currentColor、stroke 1.8。
+// 以前播放器混着四种图标来源（黄色 emoji 🔒、文字字形 ⏸⧉⋯⭳、两枚内联 SVG），
+// 字重与光学尺寸都不一致，看起来像四个不同时代的控件拼在一起。
+// 改成单表 + 单函数，所有按钮共用一套描边；需要实心的才进 VV_ICON_FILL。
+var VV_ICONS = {
+    back: 'M15 5l-7 7 7 7',
+    close: 'M6.5 6.5l11 11M17.5 6.5l-11 11',
+    play: 'M9 5.6v12.8L19 12z',
+    pause: 'M9.5 5h2.2v14H9.5zM14.3 5h2.2v14h-2.2z',
+    next: 'M6 5.5l8.5 6.5L6 18.5M18 5.5v13',
+    pip: 'M3 5.5h18v13H3zM12.5 12h6v4.5h-6z',
+    fs: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',
+    fsExit: 'M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5',
+    dl: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M4.5 19.5h15',
+    lock: 'M6.5 10.5h11v9h-11zM9 10.5V7.5a3 3 0 016 0v3',
+    unlock: 'M6.5 10.5h11v9h-11zM9 10.5V7.5a3 3 0 015.7-1.4',
+    link: 'M10.5 13.5a3.5 3.5 0 005 0l2.5-2.5a3.5 3.5 0 00-5-5l-1 1M13.5 10.5a3.5 3.5 0 00-5 0L6 13a3.5 3.5 0 005 5l1-1',
+    more: 'M5.2 12h1.6M11.2 12h1.6M17.2 12h1.6',
+    gear: 'M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4zM12 3v2.2M12 18.8V21M4.6 7.9l1.9 1.1M17.5 15l1.9 1.1M4.6 16.1l1.9-1.1M17.5 9l1.9-1.1',
+    check: 'M5 12.5l4.5 4.5L19 7.5'
+};
+// play / pause 用实心：描边三角形在 20px 下会显得细弱，也和其余线性图标分不开层级
+var VV_ICON_FILL = { play: 1, pause: 1 };
+
+function vvIcon(n, sz) {
+    var d = VV_ICONS[n];
+    if (!d) return '';
+    var s = sz || 20;
+    return '<svg class="vv-ico" viewBox="0 0 24 24" width="' + s + '" height="' + s + '"' +
+        ' aria-hidden="true" focusable="false" fill="' + (VV_ICON_FILL[n] ? 'currentColor' : 'none') + '"' +
+        ' stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="' + d + '"/></svg>';
+}
+
 // 把界面移到 <html> 末尾：同 z-index 时后插入的元素在上，可压过页面广告浮层
 // 优先 moveBefore（原子移动，不触发媒体重载/动画重播），旧 WebView 回退 appendChild
 function vvBringToFront(el) {

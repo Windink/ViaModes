@@ -249,14 +249,27 @@ function vvResumePageMediaNow(list) {
 }
 
 var ROOT = null, VID = null, BRIGHT = null, TOPBAR = null, BOTBAR = null, CBTN = null,
-    CSPLAY = null, CSPAUSE = null, CSTIME = null, CSPROG = null, CSBUF = null, CSCUR = null,
-    CSPROGDOT = null, SPEEDCHIP = null, LOCKMARK = null, SEEKTIP = null, GESTIP = null, QUAL = null,
+    CSPLAY = null, CSTIME = null, CSPROG = null, CSBUF = null, CSCUR = null,
+    CSPROGDOT = null, LOCKMARK = null, SEEKTIP = null, GESTIP = null,
     LOADING = null, LOADBAR = null, LOADFILL = null, ERRBOX = null;
+
 
 // 环形进度周长（r=19 → 2πr ≈ 119.38）
 var VV_LOAD_CIRC = 119.4;
 // HLS 显示百分比时认为"缓冲到位"的目标秒数（够播就算 100%）
 var VV_LOAD_TARGET_S = 15;
+
+// 控制栏按钮的统一工厂：图标 + data-act + 可访问名。
+// title 不只是提示——几个诊断脚本用 textContent + title 找"播放/关闭"按钮，
+// 换成纯 SVG 后 textContent 为空，title 是它们的兜底路径。
+function vvCsBtn(act, icon, size, label, cls) {
+    var b = vvEl('button', 'vv-csbtn' + (cls ? ' ' + cls : ''));
+    b.setAttribute('data-act', act);
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    b.innerHTML = vvIcon(icon, size);
+    return b;
+}
 
 function vvEnsurePlayerRoot() {
     if (ROOT) { try { document.documentElement.appendChild(ROOT); } catch (e) {} return ROOT; }
@@ -317,26 +330,28 @@ function vvEnsurePlayerRoot() {
     }, true);
 
     TOPBAR = vvEl('div', 'vv-cs-top');
-    var backBtn = vvEl('button', 'vv-csbtn', '✕');
+    var backBtn = vvCsBtn('back', 'back', 22, '关闭');
     backBtn.id = 'vv-back';
     var title = vvEl('div', 'vv-title', '');
     title.id = 'vv-title';
-    var pipBtn = vvEl('button', 'vv-csbtn', '');
-    pipBtn.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="#fff" stroke="none"/></svg>';
-    pipBtn.style.padding = '8px 8px';
-    var fsBtn = vvEl('button', 'vv-csbtn', '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M7 3H3v4M17 3h4v4M7 21H3v-4M17 21h4v-4"/></svg>');
-    fsBtn.style.padding = '8px 8px';
-    var dlTop = vvEl('button', 'vv-csbtn', '⭳');
+    // 右侧三个次要操作收进一枚玻璃胶囊：和标题分开归组，也让它们有统一的 32px 命中框
+    var topActs = vvEl('div', 'vv-top-acts');
+    var pipBtn = vvCsBtn('pip', 'pip', 20, '画中画');
+    var fsBtn = vvCsBtn('fs', 'fs', 20, '全屏');
+    fsBtn.id = 'vv-fs';
+    var dlTop = vvCsBtn('download', 'dl', 20, '下载');
     dlTop.addEventListener('click', function () { if (VV.active) vvDownloadItem(VV.active.item); });
+    topActs.appendChild(pipBtn);
+    topActs.appendChild(fsBtn);
+    topActs.appendChild(dlTop);
     TOPBAR.appendChild(backBtn);
     TOPBAR.appendChild(title);
-    TOPBAR.appendChild(pipBtn);
-    TOPBAR.appendChild(fsBtn);
-    TOPBAR.appendChild(dlTop);
+    TOPBAR.appendChild(topActs);
 
     BOTBAR = vvEl('div', 'vv-cs-bottom');
     var progRow = vvEl('div', 'vv-prog-row');
     CSTIME = vvEl('div', 'vv-time', '00:00');
+    CSTIME.id = 'vv-cur';
     CSPROG = vvEl('div', 'vv-prog');
     CSPROG.innerHTML = '<div class="vv-prog-track"></div><div class="vv-prog-buf"></div><div class="vv-prog-cur"></div><div class="vv-prog-dot"></div>';
     CSBUF = CSPROG.querySelector('.vv-prog-buf');
@@ -348,45 +363,60 @@ function vvEnsurePlayerRoot() {
     progRow.appendChild(CSPROG);
     progRow.appendChild(durEl);
 
-    var actRow = vvEl('div');
-    actRow.style.cssText = 'display:flex;align-items:center;margin-top:2px';
-    CSPLAY = vvEl('button', 'vv-csbtn', '⏸');
-    CSPLAY.style.fontSize = '20px';
-    CSPLAY.style.width = '44px';
-    var speedChip = vvEl('button', 'vv-csbtn', '倍速');
-    speedChip.style.fontSize = '12px';
-    speedChip.style.color = '#cfe0ff';
-    speedChip.id = 'vv-speed-chip';
-    var lockBtn = vvEl('button', 'vv-csbtn', '🔒');
-    lockBtn.style.fontSize = '15px';
-    lockBtn.id = 'vv-lock-btn';
-    var nextBtn = vvEl('button', 'vv-csbtn', '下一集 ▶｜');
-    nextBtn.style.fontSize = '12px';
-    nextBtn.style.color = '#cfd1d8';
+    // 动作行：[播放][下一集] …… [清晰度][倍速][锁][更多]
+    // 复制链接原来占着底栏一格，但它和"外部播放器 / 复制链接"完全重叠，
+    // 收进「更多」菜单后右侧四件才有足够间距（360px 屏上不再挤成一团）。
+    var actRow = vvEl('div', 'vv-act-row');
+    CSPLAY = vvCsBtn('play', 'play', 22, '播放');
+    CSPLAY.id = 'vv-play-btn';
+
+    var nextBtn = vvEl('button', 'vv-csbtn vv-next-btn');
     nextBtn.id = 'vv-next-btn';
+    nextBtn.setAttribute('data-act', 'next');
+    nextBtn.setAttribute('aria-label', '下一集');
+    nextBtn.title = '下一集';
+    nextBtn.innerHTML = vvIcon('next', 16) + '<span class="vv-next-t">下一集</span>';
     nextBtn.style.display = 'none';
-    var copyBtn = vvEl('button', 'vv-csbtn', '⧉');
-    copyBtn.style.fontSize = '14px';
-    var moreBtn = vvEl('button', 'vv-csbtn', '⋯');
-    moreBtn.style.fontSize = '17px';
-    var spacer = vvEl('div');
-    spacer.style.cssText = 'flex:1';
+
+    var spacer = vvEl('div', 'vv-spacer');
+
+    // 清晰度常驻按钮：只在多码率 HLS 时出现。原来它埋在「更多 → 画质」两级深处，
+    // 而切码率是观看中最常用的操作之一，值得一个一级入口。
+    var qualityChip = vvEl('button', 'vv-csbtn vv-chip vv-chip--q');
+    qualityChip.id = 'vv-quality-chip';
+    qualityChip.setAttribute('data-act', 'quality');
+    qualityChip.setAttribute('aria-label', '清晰度');
+    qualityChip.title = '清晰度';
+
+    var speedChip = vvEl('button', 'vv-csbtn vv-chip');
+    speedChip.id = 'vv-speed-chip';
+    speedChip.setAttribute('data-act', 'speed');
+    speedChip.setAttribute('aria-label', '播放速度');
+    speedChip.title = '播放速度';
+
+    var lockBtn = vvCsBtn('lock', 'unlock', 20, '锁定');
+    lockBtn.id = 'vv-lock-btn';
+    var moreBtn = vvCsBtn('more', 'more', 20, '更多');
+
     actRow.appendChild(CSPLAY);
-    actRow.appendChild(speedChip);
-    actRow.appendChild(spacer);
     actRow.appendChild(nextBtn);
+    actRow.appendChild(spacer);
+    actRow.appendChild(qualityChip);
+    actRow.appendChild(speedChip);
     actRow.appendChild(lockBtn);
-    actRow.appendChild(copyBtn);
     actRow.appendChild(moreBtn);
 
     BOTBAR.appendChild(progRow);
     BOTBAR.appendChild(actRow);
 
-    CBTN = vvEl('button', 'vv-center-play', '▶');
-    LOCKMARK = vvEl('button', 'vv-lockmark', '🔓');
+    CBTN = vvEl('button', 'vv-center-play');
+    CBTN.innerHTML = vvIcon('play', 30);
+    CBTN.setAttribute('aria-label', '播放');
+    LOCKMARK = vvEl('button', 'vv-lockmark');
+    LOCKMARK.innerHTML = vvIcon('lock', 18);
+    LOCKMARK.setAttribute('aria-label', '锁定');
     SEEKTIP = vvEl('div', 'vv-seek-tip', '');
     GESTIP = vvEl('div', 'vv-ges-tip', '');
-    QUAL = null;
 
     var sheet = vvEl('div', 'vv-sheet');
     sheet.id = 'vv-sheet';
@@ -411,14 +441,22 @@ function vvEnsurePlayerRoot() {
     CSPLAY.addEventListener('click', vvTogglePlay);
     CBTN.addEventListener('click', vvTogglePlay);
     speedChip.addEventListener('click', function (e) { e.stopPropagation(); vvSpeedMenu(); });
+    qualityChip.addEventListener('click', function (e) { e.stopPropagation(); vvQualityMenu(); });
     lockBtn.addEventListener('click', function (e) { e.stopPropagation(); vvToggleLock(); });
     LOCKMARK.addEventListener('click', function (e) { e.stopPropagation(); vvToggleLock(); });
-    copyBtn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (VV.active) { vvCopy(VV.active.item.url); vvToast('已复制链接'); }
-    });
     nextBtn.addEventListener('click', function (e) { e.stopPropagation(); vvGoNext(); });
     moreBtn.addEventListener('click', function (e) { e.stopPropagation(); vvMenuSheet(); });
+
+    // 全屏图标随状态切换。document 级只绑一次，避免反复开关播放器叠加监听。
+    if (!VV._fsBound) {
+        VV._fsBound = true;
+        document.addEventListener('fullscreenchange', function () {
+            try {
+                var b = document.querySelector('.vv-cs-top [data-act="fs"]');
+                if (b) b.innerHTML = vvIcon(document.fullscreenElement ? 'fsExit' : 'fs', 20);
+            } catch (eF) {}
+        });
+    }
 
     vvBindGestures();
     vvBindVideo();
@@ -1511,7 +1549,7 @@ function vvOnTime() {
             if (CSCUR) CSCUR.style.width = '100%';
             if (CSPROGDOT) CSPROGDOT.style.left = '100%';
             if (CSBUF) CSBUF.style.width = '100%';
-        } else if (dur > 0 && CSCUR) {
+        } else if (dur > 0 && CSCUR && !(typeof vvG === 'object' && vvG && vvG.progDrag)) {
             var pct = Math.min(100, (cur / dur) * 100);
             CSCUR.style.width = pct + '%';
             CSPROGDOT.style.left = pct + '%';
@@ -1582,8 +1620,13 @@ function vvUpdatePlayUI() {
     var paused = true;
     try { paused = VID.paused; } catch (e) {}
     try {
-        CSPLAY.innerHTML = paused ? '▶' : '⏸';
-        CBTN.innerHTML = paused ? '▶' : '⏸';
+        var label = paused ? '播放' : '暂停';
+        CSPLAY.innerHTML = vvIcon(paused ? 'play' : 'pause', 22);
+        CBTN.innerHTML = vvIcon(paused ? 'play' : 'pause', 30);
+        CSPLAY.setAttribute('aria-label', label);
+        CBTN.setAttribute('aria-label', label);
+        // 播放三角在圆里视觉上偏右，暂停双竖条则不需要偏移
+        if (paused) CBTN.classList.remove('pause'); else CBTN.classList.add('pause');
     } catch (e2) {}
 }
 
@@ -1676,9 +1719,18 @@ function closePlayer() {
 function vvToggleLock() {
     if (!VV.active) return;
     VV.active.locked = !VV.active.locked;
-    ROOT.classList.toggle('locked', VV.active.locked);
-    LOCKMARK.innerHTML = VV.active.locked ? '🔓' : '🔒';
-    vvToast(VV.active.locked ? '已锁定，点右上方图标解锁' : '已解锁');
+    var on = VV.active.locked;
+    ROOT.classList.toggle('locked', on);
+    // 两处锁图标必须来自同一个状态源：以前底栏 🔒 与浮动 🔓 各写各的，语义还相反
+    LOCKMARK.innerHTML = vvIcon(on ? 'unlock' : 'lock', 18);
+    LOCKMARK.setAttribute('aria-label', on ? '解锁' : '锁定');
+    var lb = document.getElementById('vv-lock-btn');
+    if (lb) {
+        lb.innerHTML = vvIcon(on ? 'lock' : 'unlock', 20);
+        lb.setAttribute('aria-pressed', on ? 'true' : 'false');
+        lb.setAttribute('aria-label', on ? '已锁定' : '锁定');
+    }
+    vvToast(on ? '已锁定，点右上方图标解锁' : '已解锁');
 }
 
 function vvTryPip() {

@@ -527,9 +527,7 @@ try {
     // ============ K. 画质菜单（在「更多」菜单里）===========
     const quality = await page.evaluate(async () => {
         const root = document.querySelector('.vv-player-root');
-        const btns = root.querySelectorAll('.vv-cs-bottom .vv-csbtn');
-        let moreBtn = null;
-        for (const b of btns) if (b.textContent.indexOf('⋯') >= 0) moreBtn = b;
+        const moreBtn = root.querySelector('.vv-cs-bottom [data-act="more"]');
         if (!moreBtn) return { skip: true };
         moreBtn.click();
         await new Promise((r2) => setTimeout(r2, 250));
@@ -655,9 +653,7 @@ try {
     // ============ N. 更多菜单（⋯）===========
     const more = await page.evaluate(async () => {
         const root = document.querySelector('.vv-player-root');
-        const btns = root.querySelectorAll('.vv-cs-bottom .vv-csbtn');
-        let moreBtn = null;
-        for (const b of btns) if (b.textContent.indexOf('⋯') >= 0) moreBtn = b;
+        const moreBtn = root.querySelector('.vv-cs-bottom [data-act="more"]');
         if (!moreBtn) return { skip: true };
         moreBtn.click();
         await new Promise((r2) => setTimeout(r2, 250));
@@ -768,9 +764,8 @@ try {
             const mp4 = window.__vv.VV.items.find((x) => x.type === 'MP4');
             const root = document.querySelector('.vv-player-root');
             // 顶部 ⭳ 按钮下载的是当前正在播放的视频
-            for (const b of root.querySelectorAll('.vv-cs-top .vv-csbtn')) {
-                if (b.textContent.indexOf('⭳') >= 0) { b.click(); out.clicked = true; break; }
-            }
+            const b = root.querySelector('.vv-cs-top [data-act="download"]');
+            if (b) { b.click(); out.clicked = true; }
             await new Promise((r2) => setTimeout(r2, 900));
         } catch (e) { out.err = String(e && e.message); }
         HTMLAnchorElement.prototype.click = orig;

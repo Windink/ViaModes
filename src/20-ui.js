@@ -176,12 +176,15 @@ function vvEnsurePanel() {
     var title = vvEl('div', 'vv-head-title', '视频嗅探');
     var btnScan = vvEl('button', 'vv-head-btn', '刷新');
     var btnClear = vvEl('button', 'vv-head-btn', '清空');
-    var btnClose = vvEl('button', 'vv-head-btn', '✕');
+    var btnClose = vvEl('button', 'vv-head-btn');
+    btnClose.innerHTML = vvIcon('close', 14);
+    btnClose.setAttribute('aria-label', '关闭');
+    btnClose.title = '关闭';
     head.appendChild(title);
     head.appendChild(btnScan);
     head.appendChild(btnClear);
     head.appendChild(btnClose);
-    var note = vvEl('div', 'vv-prefix-note', '▶ 播放进内置播放器 · ⭳ 下载 · ⧉ 导出给外部播放器');
+    var note = vvEl('div', 'vv-prefix-note', '播放进内置播放器 · 下载 · 导出给外部播放器');
     var list = vvEl('div', 'vv-list');
     panel.appendChild(head);
     panel.appendChild(note);
@@ -258,11 +261,20 @@ function vvRenderPanel(api) {
             '<div class="vv-row-tags"><span class="vv-tag ' + item.type + '">' + tagText + '</span></div>' +
             '<div class="vv-row-sub">' + vvEscape(sub) + '</div>';
         var acts = vvEl('div', 'vv-row-acts');
-        var btnDl = vvEl('button', 'vv-btn-mini', '⭳');
-        var btnCopy = vvEl('button', 'vv-btn-mini', '⧉');
-        var btnPlay = vvEl('button', 'vv-btn-play', '▶');
+        var btnDl = vvEl('button', 'vv-btn-mini');
+        var btnCopy = vvEl('button', 'vv-btn-mini');
+        var btnPlay = vvEl('button', 'vv-btn-play');
+        btnDl.innerHTML = vvIcon('dl', 15);
+        btnCopy.innerHTML = vvIcon('link', 15);
+        btnPlay.innerHTML = vvIcon('play', 16);
         btnDl.title = '下载';
-        btnCopy.title = '复制';
+        btnCopy.title = '导出';
+        // title 是诊断脚本找播放键的兜底路径（它们用 textContent + title 做正则）；
+        // 换成纯 SVG 后 textContent 为空，这里必须补上。
+        btnPlay.title = '播放';
+        btnDl.setAttribute('aria-label', '下载');
+        btnCopy.setAttribute('aria-label', '导出给外部播放器');
+        btnPlay.setAttribute('aria-label', '播放');
         btnPlay.addEventListener('click', function () {
             api.close();
             setTimeout(function () { openPlayer(item); }, 180);

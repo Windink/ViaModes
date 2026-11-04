@@ -238,7 +238,10 @@ function vvShareOpen(item) {
 
     var head = vvEl('div', 'vv-share-head');
     var title = vvEl('div', 'vv-share-title', '外部播放器');
-    var x = vvEl('button', 'vv-share-x', '✕');
+    var x = vvEl('button', 'vv-share-x');
+    x.innerHTML = vvIcon('close', 14);
+    x.setAttribute('aria-label', '关闭');
+    x.title = '关闭';
     head.appendChild(title);
     head.appendChild(x);
 
