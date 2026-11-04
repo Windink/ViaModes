@@ -10,7 +10,7 @@ function vvSetupMenu() {
         GM_registerMenuCommand('后台释放解码器 / 标签页休眠（当前：' + (VV.cfg.hibernate ? '开' : '关') + '）', vvToggleHibernate);
         GM_registerMenuCommand('强制关闭播放器（页面卡死时用）', vvForceClose);
         GM_registerMenuCommand('资源释放自检（退出后卡顿/不释放时用）', vvReleaseAudit);
-        GM_registerMenuCommand('立即强制释放播放器资源', vvForceRelease);
+        GM_registerMenuCommand('本页让出解码器（其它页面要用）', vvForceRelease);
         GM_registerMenuCommand('清除所有播放进度', vvClearProgress);
         GM_registerMenuCommand('自检（排查未生效）', vvSelfCheck);
         GM_registerMenuCommand('关于', vvAbout);
@@ -51,9 +51,9 @@ function vvToggleHibernate() {
     VV.cfg.hibernate = !VV.cfg.hibernate;
     vvSet('hibernate', VV.cfg.hibernate);
     if (VV.cfg.hibernate) {
-        vvToast('已开启标签页休眠：切到后台时释放视频解码器，回来自动恢复进度', true);
+        vvToast('已开启标签页休眠：切到后台时把页面视频的解码器也交出去（多页签更稳）', true);
     } else {
-        vvToast('已关闭标签页休眠：后台页面将继续占用解码器', true);
+        vvToast('已关闭页面媒体休眠：后台页签会继续占着页面播放器的解码器，多开几页可能播不动内置播放器', true);
     }
 }
 
@@ -113,6 +113,38 @@ function vvReleaseAudit() {
     L.push('本次打开播放器: ' + (VV._openCount || 0) + ' 次');
     L.push('累计销毁实例: ' + (VV._killCount || 0) + ' 个');
     try {
+        var rafGap = VV._rafSeen ? Math.round((Date.now() - (VV._rafLast || 0)) / 100) / 10 : -1;
+        L.push('前台判定: ' + (vvTabHidden() ? '后台（已释放）' : '前台') +
+            ' / rAF 间隔 ' + (rafGap < 0 ? '未采样' : rafGap + 's') +
+            ' / 进后台 ' + (VV._bgCount || 0) + ' 次');
+    } catch (e6) {}
+    try {
+        var mc = 0, ms = 0;
+        var vs2 = document.querySelectorAll('video,audio');
+        for (var j = 0; j < vs2.length; j++) {
+            mc++;
+            try { if (vs2[j].currentSrc || vs2[j].getAttribute('src')) ms++; } catch (eM) {}
+        }
+        L.push('本页媒体管线: ' + mc + ' 个（带 src 的 ' + ms + ' 个 = 可能各占一个解码器）');
+    } catch (e7) {}
+    try {
+        var le = VV._lastHlsErr;
+        if (le) {
+            L.push('最近 hls 错误: ' + (le.type || '?') + ' / ' + (le.details || '?') +
+                (le.code ? ' / HTTP ' + le.code : '') +
+                ' (fatal=' + (le.fatal ? '是' : '否') + ', ' + Math.round((Date.now() - le.at) / 1000) + ' 秒前)');
+        }
+    } catch (e10) {}
+    try {
+        var r = VV._lastRescue;
+        if (r) L.push('最近一次解码器自救: ' + r.why + '（第 ' + r.n + ' 次）/ ' + Math.round((Date.now() - r.ts) / 1000) + ' 秒前');
+    } catch (e8) {}
+    try {
+        L.push('跨页协调: 常驻监听 ' + (VV._peerTimer ? '开 ✓' : '关 ✗') +
+            ' / 被叫停后拆掉 ' + (VV._peerReleaseCount || 0) + ' 路' +
+            (VV._peerReleased ? '（当前让位中）' : ''));
+    } catch (e9) {}
+    try {
         var a = VV._lastAudit;
         if (a) {
             var ago = Math.round((Date.now() - a.ts) / 1000);
@@ -127,7 +159,7 @@ function vvReleaseAudit() {
     L.push('UA: ' + navigator.userAgent.slice(0, 48));
 
     alert('资源释放自检\n\n' + L.join('\n') +
-        '\n\n判读：\n· 「播放器层」应为已移除\n· 「hls 实例残留」应为 0\n· 退出后页面 video 仍「播放中/MSE」= 解码器被占\n\n仍不正常就点菜单「立即强制释放播放器资源」，看是否立刻恢复。');
+        '\n\n判读：\n· 「播放器层」应为已移除\n· 「hls 实例残留」应为 0\n· 退出后页面 video 仍「播放中/MSE」= 解码器被占\n\n仍不正常就点菜单「本页让出解码器（其它页面要用）」，看是否立刻恢复。');
 }
 
 function vvForceRelease() {
@@ -146,8 +178,14 @@ function vvForceRelease() {
     } catch (e3) {}
     try {
         var left = (VV._hlsPool || []).length;
-        alert('已强制释放\n\n· hls 实例: ' + n + ' 个\n· video 元素: ' + cnt + ' 个\n· 残留实例: ' + left +
-            '\n\n页面立刻恢复 → 问题在释放链，请把「自检」截图给我。\n毫无变化 → 占用来自站点自己的播放器。');
+        // 站点自己的播放器也一起交还：多页签"播不动"多半是它们占着硬件解码器，
+        // 只放我们自己的播放器等于没放。
+        var pageN = 0;
+        try { pageN = vvReleaseAllMedia('manual'); } catch (eP) {}
+        alert('已强制释放\n\n· hls 实例: ' + n + ' 个\n· 播放器 video: ' + cnt + ' 个' +
+            '\n· 本页其它媒体（含站点播放器）: ' + pageN + ' 个' +
+            '\n· 残留实例: ' + left +
+            '\n\n页面立刻恢复 → 问题在释放链，请把「自检」截图给我。\n毫无变化 → 占用来自其它页签，请在那些页签里也点一次。');
     } catch (e4) {}
 }
 

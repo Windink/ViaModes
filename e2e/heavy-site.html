@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>重站压测（模拟瀑布流 + 大 bundle + 高频接口）</title>
+<style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #fafafa; color: #222; }
+    header { padding: 12px 16px; background: #fff; border-bottom: 1px solid #e6e6e6; position: sticky; top: 0; z-index: 5; }
+    h1 { font-size: 14px; margin: 0 0 4px; }
+    .sub { font-size: 11px; color: #888; }
+    video { width: 100%; max-width: 360px; background: #000; display: block; margin: 8px 16px; }
+    #feed { padding: 8px 12px 40px; }
+    .card { background: #fff; border: 1px solid #eee; border-radius: 8px; padding: 8px; margin-bottom: 8px; }
+    .card img { width: 100%; height: 80px; object-fit: cover; background: #eee; display: block; }
+    .card .t { font-size: 12px; margin-top: 6px; color: #444; }
+    #stat { position: fixed; right: 8px; bottom: 8px; background: rgba(0,0,0,.72); color: #9f9;
+             font: 10px/1.5 monospace; padding: 6px 8px; border-radius: 6px; white-space: pre; z-index: 9; }
+</style>
+</head>
+<body>
+<header>
+    <h1>重站压测</h1>
+    <div class="sub">模拟：多个 MB 级 bundle · 高频 JSON 接口 · 瀑布流无限追加 · 懒加载改 src</div>
+</header>
+<video id="siteVideo" controls preload="metadata" src="/e2e/flower.mp4"></video>
+<div id="feed"></div>
+<div id="stat"></div>
+<script>
+// ---- 指标采集：必须在注入被测脚本之前装好 ----
+window.__perf = { long: 0, longN: 0, maxLong: 0, gaps: [], heap: 0, injected: false, started: 0 };
+
+try {
+    new PerformanceObserver(function (list) {
+        var es = list.getEntries();
+        for (var i = 0; i < es.length; i++) {
+            if (es[i].duration < 50) continue;
+            __perf.long += es[i].duration;
+            __perf.longN++;
+            if (es[i].duration > __perf.maxLong) __perf.maxLong = es[i].duration;
+        }
+    }).observe({ entryTypes: ['longtask'] });
+} catch (e) {}
+
+var __lastFrame = 0;
+function __beat(t) {
+    if (__lastFrame && __perf.gaps.length < 3000) __perf.gaps.push(Math.round(t - __lastFrame));
+    __lastFrame = t;
+    requestAnimationFrame(__beat);
+}
+requestAnimationFrame(__beat);
+
+function __pct(arr, p) {
+    if (!arr.length) return 0;
+    var a = arr.slice().sort(function (x, y) { return x - y; });
+    return a[Math.min(a.length - 1, Math.floor(a.length * p))];
+}
+window.__perfReport = function () {
+    var g = __perf.gaps;
+    var over50 = 0, sum = 0;
+    for (var i = 0; i < g.length; i++) { sum += g[i]; if (g[i] > 50) over50++; }
+    var mem = 0;
+    try { mem = performance.memory ? performance.memory.usedJSHeapSize : 0; } catch (e) {}
+    return {
+        long: Math.round(__perf.long),
+        longN: __perf.longN,
+        maxLong: Math.round(__perf.maxLong),
+        frames: g.length,
+        avgGap: g.length ? +(sum / g.length).toFixed(1) : 0,
+        p95Gap: __pct(g, 0.95),
+        jankRate: g.length ? +(over50 / g.length * 100).toFixed(1) : 0,
+        heapMB: mem ? +(mem / 1048576).toFixed(1) : 0,
+        injected: __perf.injected
+    };
+};
+</script>
+<script>
+// ---- 场景参数 ----
+var q = new URLSearchParams(location.search);
+var CFG = {
+    js: +(q.get('js') || 3),        // 几个大 bundle
+    jsKb: +(q.get('jskb') || 1200),
+    api: +(q.get('api') || 12),     // 每秒几个 JSON 接口
+    apiKb: +(q.get('apikb') || 48),
+    nodes: +(q.get('nodes') || 120),// 每秒新增多少卡片
+    noscript: q.get('noscript') === '1'
+};
+
+// 1) 大 bundle：真实站点的 JS 都是 text/javascript，几十个、每个 1MB 上下。
+//    这类响应不需要读正文，读了就是白复制。
+for (var i = 0; i < CFG.js; i++) {
+    (function (n) {
+        var s = document.createElement('script');
+        s.src = '/__blob?kb=' + CFG.jsKb + '&ct=text/javascript&r=' + n;
+        s.async = true;
+        document.head.appendChild(s);
+    })(i);
+}
+
+// 2) 高频 JSON 接口：正文里带视频地址，属于"该被嗅探"的那一类。
+setInterval(function () {
+    for (var i = 0; i < CFG.api; i++) {
+        fetch('/__blob?kb=' + CFG.apiKb + '&ct=application/json&seed=mp4&t=' + Date.now() + '_' + i)
+            .then(function (r) { return r.text(); }).catch(function () {});
+    }
+}, 1000);
+
+// 2b) SPA 路由 / 无限滚动返回的 HTML 片段 + 样式 + 通过 fetch 引入的脚本。
+// 这三类响应体以前一律被 clone().text() 整份读出来跑正则，纯浪费。
+setInterval(function () {
+    fetch('/__blob?kb=200&ct=text/html; charset=utf-8&t=' + Date.now())
+        .then(function (r) { return r.text(); }).catch(function () {});
+    fetch('/__blob?kb=120&ct=text/css; charset=utf-8&t=' + Date.now())
+        .then(function (r) { return r.text(); }).catch(function () {});
+    fetch('/__blob?kb=600&ct=text/javascript; charset=utf-8&t=' + Date.now())
+        .then(function (r) { return r.text(); }).catch(function () {});
+}, 1000);
+
+// 3) 瀑布流：无限追加卡片。这是"重站"最典型的形态，
+//    也是把"每个新增节点都做一次子树查询"这种写法放大到致命的地方。
+var feed = document.getElementById('feed');
+var seq = 0;
+setInterval(function () {
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < CFG.nodes; i++) {
+        var card = document.createElement('div');
+        card.className = 'card';
+        var img = document.createElement('img');
+        // 懒加载：先占位，随后改 src（触发 MutationObserver 的 attributes 回调）
+        img.setAttribute('data-src', '/__blob?kb=1&ct=image/png&n=' + (seq + i));
+        var t = document.createElement('div');
+        t.className = 't';
+        t.textContent = '条目 ' + (seq + i);
+        card.appendChild(img);
+        card.appendChild(t);
+        frag.appendChild(card);
+    }
+    feed.appendChild(frag);
+    seq += CFG.nodes;
+    // 模拟懒加载把 src 填上（每张都会触发一次属性变更）
+    var imgs = feed.querySelectorAll('img[data-src]');
+    var n = Math.min(imgs.length, 40);
+    for (var k = 0; k < n; k++) {
+        imgs[k].src = imgs[k].getAttribute('data-src');
+        imgs[k].removeAttribute('data-src');
+    }
+    // 只保留最近 300 张，避免测试页自己先 OOM 干扰结论
+    while (feed.childElementCount > 300) feed.removeChild(feed.firstElementChild);
+}, 1000);
+
+// 4) 模拟"站点自己的播放器在跑"：静音自动播，避免出声
+var sv = document.getElementById('siteVideo');
+sv.muted = true;
+try {
+    sv.play().then(function () { __perf.played = 1; })
+        .catch(function (e) { __perf.playErr = String((e && e.name) || e); });
+} catch (e) { __perf.playErr = 'sync:' + e; }
+
+// 5) 模拟主线程被站点自己的脚本卡住（大表格渲染、加密解密、广告 SDK 同步计算）。
+//    这是"有的站一点就卡"最真实的样子：rAF 停 2 秒、页面仍是可见的。
+//    我们用它来验证前后台判定不会把"本页卡了一下"误读成"用户切走了"。
+if (q.get('stall') === '1') {
+    setInterval(function () {
+        var t0 = Date.now();
+        var x = 1;
+        while (Date.now() - t0 < 2000) { x = x + Math.sqrt(x); }
+        __perf.stalls = (__perf.stalls || 0) + 1;
+    }, 6000);
+}
+
+setInterval(function () {
+    var r = __perfReport();
+    document.getElementById('stat').textContent =
+        'long ' + r.long + 'ms/' + r.longN + ' 次\n' +
+        'max ' + r.maxLong + 'ms  p95帧 ' + r.p95Gap + 'ms\n' +
+        '卡顿率 ' + r.jankRate + '%  heap ' + r.heapMB + 'MB';
+}, 1000);
+</script>
+<script>
+// 被测脚本按需注入（noscript=1 时作为对照组）
+if (!CFG.noscript) {
+    var s = document.createElement('script');
+    // 用带版本号的路径别名：Via/WebView 按路径缓存，带 ?t= 拦不住
+    s.src = '/dist/vv-' + Date.now() + '.js';
+    s.async = false;
+    s.onload = function () { window.__perf.injected = true; };
+    document.head.appendChild(s);
+}
+</script>
+</body>
+</html>

@@ -38,7 +38,11 @@ var VV_CT_TYPE = {
 var VV_SCAN_RX = /(?:https?:)?\/\/[^\s"'`<>\\)\]{}]{4,600}?\.(?:m3u8|mp4|m4v|webm|mkv|flv|f4v)(?:\?[^\s"'`<>\)\]{}]{0,300})?/gi;
 
 var VV = {
-    version: '0.1.3',
+    // 构建时由 build.mjs 注入（VV_VERSION 会随改动自动 +1）。
+    // 写死版本号是之前"改了还是没生效"的根源：Via 按 @version 判断要不要更新，
+    // 版本号不动，装进去的就永远是旧脚本。
+    version: (typeof VV_VERSION !== 'undefined' ? VV_VERSION : '0.1.3'),
+    build: (typeof VV_BUILD !== 'undefined' ? VV_BUILD : ''),
     items: [],
     seen: {},
     hlsMasters: {},
@@ -98,6 +102,29 @@ function vvDel(key) {
         if (typeof GM_deleteValue === 'function') GM_deleteValue(key);
     } catch (e) {}
     try { localStorage.removeItem(VV_STORE + key); } catch (e2) {}
+}
+
+// ---- 跨页签协调专用存储 ----
+// 必须走 localStorage，不能走 GM 存储。
+// GM_setValue 是脚本级的持久化接口，Via 这类壳里各标签页各自持有一份缓存，
+// 别的页签写进去的值本页不一定能立刻读到，更没有 storage 事件；
+// 用它做"谁在播 / 请让出解码器"的协调，等于各说各话——多开几个页签就失效。
+// localStorage 是同一源共享的存储区，写入立刻对其它页签可见，还能触发 storage 事件。
+var VV_SHARED_PREFIX = 'vvs:';
+
+function vvSharedSet(key, val) {
+    try {
+        localStorage.setItem(VV_SHARED_PREFIX + key, JSON.stringify(val));
+        return true;
+    } catch (e) { return false; }
+}
+
+function vvSharedGet(key, def) {
+    try {
+        var s = localStorage.getItem(VV_SHARED_PREFIX + key);
+        if (s !== null) return JSON.parse(s);
+    } catch (e) {}
+    return def;
 }
 
 // 高频手势（亮度/音量）不要每一帧都写 GM 存储，停下来 500ms 再落盘

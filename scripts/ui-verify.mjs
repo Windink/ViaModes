@@ -779,6 +779,52 @@ try {
     ok('⭳ 下载按钮可触发', dl.clicked, dl.err || '');
     ok('下载产生带文件名的链接', !!(dl.captured && dl.captured.name), JSON.stringify(dl.captured));
 
+    // ============ Q2. 切后台 = 立刻交还解码器（多页签播不动的核心修复）============
+    // 真机上 Via 切标签时不一定会派发 visibilitychange，所以脚本里另加了 rAF 心跳兜底；
+    // 这里直接改 document.hidden 造一个"后台"，验证的是【释放动作】本身。
+    await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+        Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await sleep(700);
+    const bgState = await page.evaluate(() => {
+        const v = document.querySelector('.vv-player-video');
+        return {
+            srcLen: window.__vv.videoSrcLen(),
+            srcAttr: v ? v.getAttribute('src') : 'no-el',
+            cur: v ? (v.currentSrc || '') : 'no-el',
+            pool: window.__vv.hlsPool(),
+            hidden: window.__vv.tabHidden(),
+            suspended: !!(window.__vv.VV.active && window.__vv.VV.active._suspended),
+            released: !!(window.__vv.VV.active && window.__vv.VV.active._mediaReleased)
+        };
+    });
+    ok('切后台：判定为后台', bgState.hidden === true, JSON.stringify(bgState));
+    ok('切后台：播放器 video 的 src 被摘掉（解码器让出）', bgState.srcLen === 0, 'srcLen=' + bgState.srcLen);
+    ok('切后台：hls 实例池清空', bgState.pool === 0, 'pool=' + bgState.pool);
+    ok('切后台：播放管线标记为已释放', bgState.suspended && bgState.released, JSON.stringify(bgState));
+
+    // 回到前台：应该整条重建并接着播
+    await page.evaluate(() => {
+        delete document.hidden;
+        delete document.visibilityState;
+        document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await sleep(2600);
+    const fgState = await page.evaluate(() => {
+        const v = document.querySelector('.vv-player-video');
+        return {
+            srcLen: window.__vv.videoSrcLen(),
+            paused: v ? v.paused : null,
+            t: v ? v.currentTime : -1,
+            hidden: window.__vv.tabHidden()
+        };
+    });
+    ok('回前台：判定为前台', fgState.hidden === false, JSON.stringify(fgState));
+    ok('回前台：播放管线重建（src 回来了）', fgState.srcLen > 0, 'srcLen=' + fgState.srcLen);
+    ok('回前台：自动继续播放', fgState.paused === false, 'paused=' + fgState.paused + ' t=' + fgState.t);
+
     // ============ R. 无未捕获错误 ============
     const fatal = errors.filter((e) => !/favicon|net::ERR|Failed to load resource/i.test(e));
     ok('无未捕获运行时错误', fatal.length === 0, fatal.slice(0, 3).join(' | '));

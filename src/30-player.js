@@ -10,13 +10,17 @@ function openPlayer(item) {
     vvToggleBadge(false);
     vvSetPageFreeze(true);
     vvPausePageMedia();
+    // 先把话放出去：别的页签收到就交还解码器。Android 的硬件解码器是设备级的，
+    // 不打招呼的话，多开几个视频页就会轮到"分片能下、就是不出画"。
+    try { vvRequestPeerRelease(); } catch (ePR) {}
     VV.active = {
         item: item,
         url: item.url,
         key: vvVideoKey(item.url),
         hls: null,
         speed: parseFloat(VV.cfg.speed) || 1,
-        vol: vvGet('vol', 1),
+        // 老数据里可能是 0（旧版手势滑到底直接存 0），当成正常的 1 处理
+        vol: (function () { var v = vvGet('vol', 1); return (typeof v === 'number' && v > 0) ? v : 1; })(),
         bright: vvGet('bright', 1),
         locked: false,
         levels: [],
@@ -45,7 +49,20 @@ function openPlayer(item) {
         VV.active.resumeInfo = p;
     }
     vvApplyBrightness(VV.active.bright);
-    try { VID.volume = VV.active.vol; } catch (e) {}
+    // 音量/静音分开存：
+    //   vol  只存"非零音量"（用户最后一次听到的音量）
+    //   mute 单独记"是不是静音"
+    // 老版本只存 vol，一次手势滑到底（vol=0）之后就永久静音，界面上还没有任何
+    // 按钮能看出来，用户感知就是"视频播着但没声音"。这里顺手把这种情况修好：
+    // 读到的 vol 是 0 就当作 1，静音状态只看 mute。
+    var _sv = VV.active.vol;
+    var _sm = vvGet('mute', 0);
+    try {
+        VID.volume = (typeof _sv === 'number' && _sv > 0) ? _sv : 1;
+        VID.muted = (_sm === 1 || _sm === true);
+        // 记住"这是用户自己的选择"：巡检里的声音自愈不能把它当成我们压下去的静音
+        VV._userMuted = !!VID.muted;
+    } catch (e) {}
     try { VID.playbackRate = VV.active.speed; } catch (eS) {}
     // 抢占播放权：同一时间只允许一个页面拉流，避免多个 m3u8 页面把解码器吃光
     vvLeaseStart();
@@ -55,6 +72,7 @@ function openPlayer(item) {
     VV._endHandled = false;
     vvShowLoading(item.type === 'HLS' ? 'm3u8 加载中…' : '加载视频…');
     vvLoadMedia(item);
+    vvArmFrameWatch();
     vvStartWatchdog();
     setTimeout(function () { vvFindNext(); }, 1400);
     vvShowCS();
@@ -144,7 +162,9 @@ function vvSetPageFreeze(on) {
     } catch (e) {}
 }
 
-// 播放器打开时暂停页面里正在播放的背景视频/音频，避免抢带宽、抢解码器
+// 播放器打开时，把页面里其它 media 的**解码器**收回来。
+// 只 pause 不释放是无效的：<video> 仍然握着一条完整的解码管线，
+// 同一页两路（站点原生 + 我们的）在 1080p 下就可能把硬件解码器顶满。
 function vvPausePageMedia() {
     if (!VV._pageMedia) VV._pageMedia = [];
     try {
@@ -152,12 +172,28 @@ function vvPausePageMedia() {
         for (var i = 0; i < els.length; i++) {
             var el = els[i];
             if (!el || (ROOT && ROOT.contains(el))) continue;
-            try {
-                if (!el.paused && !el.ended && VV._pageMedia.indexOf(el) < 0) {
-                    VV._pageMedia.push(el);
-                    el.pause();
-                }
-            } catch (eM) {}
+            if (el.mediaKeys) continue;
+            var src = el.currentSrc || el.getAttribute('src') || '';
+            if (!src) continue;
+            // 只处理"确实在播"的那几路：暂停的元素本身不产生解码负载，
+            // 盲目拆掉会破坏站点播放器的状态（视频黑掉、之后 play() 一直不 resolve）。
+            // 在播的才是真占着 MediaCodec 的。
+            var playing = false;
+            try { playing = !el.paused && !el.ended && el.readyState > 0; } catch (eP) {}
+            if (!playing) continue;
+            var dup = false;
+            for (var j = 0; j < VV._pageMedia.length; j++) {
+                if (VV._pageMedia[j] && VV._pageMedia[j].el === el) { dup = true; break; }
+            }
+            if (dup) continue;
+            VV._pageMedia.push({
+                el: el, src: src, blob: src.indexOf('blob:') === 0,
+                t: el.currentTime || 0, paused: !!el.paused,
+                // 用“用户原本的静音状态”，别用此刻的 el.muted：
+                // 上一轮让出解码器可能刚把它临时静音，拿当前值记下来就永远静音了。
+                muted: (el.__vvMuted !== undefined ? el.__vvMuted : !!el.muted)
+            });
+            vvDetachMedia(el);
         }
     } catch (e) {}
 }
@@ -166,28 +202,47 @@ function vvResumePageMedia() {
     var list = VV._pageMedia || [];
     VV._pageMedia = [];
     if (!list.length) return;
+    // 后台页签里绝对不能重新起播：一起播就等于又占一个硬件解码器，
+    // 而用户根本看不见它——这正是"开几个页签后新页签播不动"的来源之一。
+    // 所以这里只在可见时恢复；不可见就先把清单存着，等回到前台再恢复。
+    if (typeof vvTabHidden === 'function' && vvTabHidden()) {
+        VV._pageMediaDeferred = (VV._pageMediaDeferred || []).concat(list);
+        return;
+    }
+    vvResumePageMediaNow(list);
+}
+
+function vvResumePageMediaNow(list) {
+    if (!list || !list.length) return;
+    if (typeof vvTabHidden === 'function' && vvTabHidden()) {
+        VV._pageMediaDeferred = (VV._pageMediaDeferred || []).concat(list);
+        return;
+    }
     // 延迟恢复：退出播放器时刚 destroy 掉 MSE，Android WebView 回收 MediaCodec 需要一点时间，
     // 立刻 play() 会撞上"解码器忙"，表现就是页面视频黑着不动，要等一阵或干脆关页签。
     // 首次 700ms（给我们的硬释放让路），被拒的话再补一次，多数机型第二次就能起来。
     setTimeout(function () {
+        if (typeof vvTabHidden === 'function' && vvTabHidden()) {
+            VV._pageMediaDeferred = (VV._pageMediaDeferred || []).concat(list);
+            return;
+        }
         for (var i = 0; i < list.length; i++) {
-            (function (el) {
-                function tryPlay(retry) {
-                    try {
-                        var p = el.play();
-                        if (p && p.catch) {
-                            p.catch(function (err) {
-                                var n = (err && err.name) || '';
-                                if (retry && /NotSupported|Abort|InvalidState|NotReadable/i.test(n)) {
-                                    setTimeout(function () { tryPlay(false); }, 800);
-                                }
-                            });
-                        }
-                    } catch (e) {
-                        if (retry) setTimeout(function () { tryPlay(false); }, 800);
-                    }
+            (function (rec) {
+                // 兼容旧格式（纯元素）
+                var el = (rec && rec.el) ? rec.el : rec;
+                if (!el) return;
+                // 没被摘过 src 的（保守模式 / 后来自己恢复了）：直接接着播
+                var hasSrc = vvHasSrc(el);
+                if (hasSrc) {
+                    try { el.play().catch(function () {}); } catch (e1) {}
+                    return;
                 }
-                tryPlay(true);
+                if (!rec || !rec.src) return;
+                // 被摘过的：装回去再播。直链基本都能成功；
+                // blob 只有在页面还没 revoke、MediaSource 还没 closed 时才有机会。
+                vvAttachMedia(el, rec.src, rec.t, rec.paused === false, function () {
+                    if (rec.blob) vvMediaLost(el);
+                }, rec.muted);
             })(list[i]);
         }
     }, 700);
@@ -464,6 +519,13 @@ function vvArmStartWatchdog() {
                 var act = VV.active || {};
                 var netFail = act._netFail || 0;
                 var code = act._lastHttpCode || 0;
+                // 已经拿到元数据/分片，却一直没出画面：先按"解码器抢不到"自救，
+                // 别把这种情形误报成"防盗链/地址失效"。
+                if (VID.readyState >= 1 && !act._blobOnly && !act._nativeTried) {
+                    if (vvCodecRescue('watchdog')) return;
+                    vvShowErr('设备的硬件解码器被占满了：同时打开的视频页签太多，系统没有空闲解码器给这一页。\n关掉 2～3 个视频页签后再点播放即可。', '解码器不够用');
+                    return;
+                }
                 var why;
                 if (code === 403 || netFail >= 3) {
                     why = '源站拒绝了请求（' + (code ? 'HTTP ' + code : '多次连接失败') + '）。很多站点（如某综艺平台）的播放地址是一次性鉴权的，被页面播放器用过之后第三方就无法复用。';
@@ -480,6 +542,78 @@ function vvArmStartWatchdog() {
 
 function vvDisarmStartWatchdog() {
     try { if (VV._startWdog) { clearTimeout(VV._startWdog); VV._startWdog = null; } } catch (e) {}
+}
+
+// ---- 解码器抢不到时的自救 ----
+//
+// 现象：播放器"能加载"（hls 拉到分片、进度条也在动），但画面一直是黑的，
+//       currentTime 卡在 0 不走；关掉几个其它视频页签后又正常。
+// 这不是网络问题，是设备级的硬件解码器被占满了（Android 的 MediaCodec 实例数是硬上限，
+// 一个后台页签里的 <video> 也会占一个）。JS 没有办法"跨页签释放"，
+// 能做的是三件事：本页全交出来 → 广播让别的页签也交 → 降到最低码率重来一次。
+function vvArmFrameWatch() {
+    vvDisarmFrameWatch();
+    var act = VV.active;
+    if (!act) return;
+    var t0 = Date.now();
+    VV._frameWatch = setInterval(function () {
+        try {
+            if (!VV.playerActive || !VID || VV.active !== act) { vvDisarmFrameWatch(); return; }
+            var el = Date.now() - t0;
+            if (el > 7000) { vvDisarmFrameWatch(); return; }
+            if (VID.error) { vvDisarmFrameWatch(); return; }
+            // 有画面在走：正常
+            if (!VID.paused && VID.currentTime > 0.08) { vvDisarmFrameWatch(); return; }
+            // 数据已经够了（HAVE_CURRENT_DATA 以上）却一帧都不出 → 解码器没拿到
+            if (el > 3200 && !VID.paused && VID.readyState >= 2) {
+                vvDisarmFrameWatch();
+                vvCodecRescue('no-frame');
+            }
+        } catch (e) { vvDisarmFrameWatch(); }
+    }, 600);
+}
+
+function vvDisarmFrameWatch() {
+    try { if (VV._frameWatch) { clearInterval(VV._frameWatch); VV._frameWatch = 0; } } catch (e) {}
+}
+
+function vvCodecRescue(why) {
+    try {
+        var act = VV.active;
+        if (!act || !act.item) return false;
+        act._rescue = act._rescue || 0;
+        // 三次：0.9s / 2.5s / 5s。
+        // 一次不够——别的页签从"发现自己失去焦点"到真正把 MediaCodec 交出来
+        // 要几秒（本页 4 秒的失焦确认阈值 + 释放耗时），只试一次就判死等于
+        // 让用户以为这页废了，其实再等几秒解码器就空出来了。
+        if (act._rescue >= 3) return false;
+        act._rescue++;
+        var wait = act._rescue === 1 ? 900 : act._rescue === 2 ? 2500 : 5000;
+        var pos = 0;
+        try { pos = (VID && isFinite(VID.currentTime) && VID.currentTime > 0) ? VID.currentTime : 0; } catch (eP) {}
+        if (!pos) pos = act._suspendT || 0;
+        act._suspendT = pos;
+        act._forceLow = true;
+        VV._lastRescue = { ts: Date.now(), why: why || '', n: act._rescue };
+        vvToast(act._rescue === 1 ? '没能拿到硬件解码器，正在让出资源并降档重试…'
+            : act._rescue === 2 ? '再试一次（其它页面正在归还解码器）…'
+                : '最后一次尝试（已降到最低清晰度）…', true);
+        // 1) 广播：请其它页签把解码器交出来
+        try { vvRequestPeerRelease(); } catch (e0) {}
+        // 2) 本页全交：hls / 播放器 <video> / 站点自带的 MSE 播放器
+        try { vvKillMedia(); } catch (e1) {}
+        try { vvKillAllHls(); } catch (e2) {}
+        try { vvDeepHibernateBlob(); } catch (e3) {}
+        // 3) 给 media 进程一点时间真正 release，再重建
+        setTimeout(function () {
+            try {
+                if (!VV.playerActive || VV.active !== act) return;
+                act._mediaReleased = false;
+                vvRebuildMedia();
+            } catch (e4) {}
+        }, wait);
+        return true;
+    } catch (e) { return false; }
 }
 
 // 设置加载进度：pct 为 null/NaN 时进入"不确定态"（只显示动画，不显示百分比）
@@ -759,6 +893,10 @@ function vvHasMseHls() {
 
 function vvLoadMedia(item) {
     vvKillMedia();
+    // vvKillMedia → vvHardReleaseVideo 会把音量压成 0、静音打开（为了立刻止住残余音频）。
+    // 重建时第一件事就是把用户原来的音量/静音还回去，否则整条重建之后画面在动、
+    // 声音一直是 0——用户感知就是"播放没声音"，而且每次从后台切回来都要中一次。
+    try { vvRestoreAudio(VID); } catch (eVA) {}
     if (VV.active) {
         VV.active._waitCount = 0;
         VV.active._waitMs = 0;
@@ -831,6 +969,10 @@ function vvLoadMedia(item) {
                         VV.active._hlsRetried = false;
                         var ls = inst.levels || [];
                         if (ls.length > 1) vvBuildQualityMenu(ls, inst);
+                        // 解码器吃紧过：直接钉在最省的一档，别让 ABR 又爬回 1080P
+                        if (VV.active && VV.active._forceLow && ls.length) {
+                            try { inst.autoLevelCapping = 0; } catch (eL0) {}
+                        }
                         var ats = inst.audioTracks || [];
                         VV.active.hlsInst = inst;
                         VV.active.audioTracks = ats;
@@ -881,6 +1023,16 @@ function vvLoadMedia(item) {
                 });
                 if (hlsEv.ERROR) inst.on(hlsEv.ERROR, function (eType, data) {
                     if (!data) return;
+                    // 留一份现场：真机上"能加载但播不了"到底是网络、鉴权还是解码器，
+                    // 只看界面是分不出来的，自检面板要靠这条判断。
+                    try {
+                        VV._lastHlsErr = {
+                            type: data.type || '', details: data.details || '',
+                            fatal: !!data.fatal,
+                            code: (data.response && data.response.code) || 0,
+                            at: Date.now()
+                        };
+                    } catch (eLE) {}
                     try {
                         if (!data.fatal) {
                             // 记录最近一次 HTTP 状态，供失败卡片判断"是 403 还是网络问题"
@@ -938,6 +1090,10 @@ function vvLoadMedia(item) {
                             }
                         } else if (data.type === hlsErr.MEDIA_ERROR) {
                             VV.active._mediaFail = (VV.active._mediaFail || 0) + 1;
+                            // "分片下载正常、就是不出画"在 hls.js 里几乎都落到这里：
+                            // addSourceBuffer / appendBuffer 拿不到解码器。
+                            // 原地 recoverMediaError 救不了这种情况，第二次就直接让位 + 重建。
+                            if (VV.active._mediaFail >= 2 && vvCodecRescue('media')) return;
                             if (VV.active._mediaFail <= 3) {
                                 vvToast('解码异常，正在恢复…');
                                 setTimeout(function () {
@@ -1041,9 +1197,20 @@ function vvHardReleaseVideo(v) {
     if (!v) return;
     var wasSrc = '';
     try { wasSrc = v.currentSrc || v.src || ''; } catch (e0) {}
+    // 先把用户原本的音量/静音记下来，再往里写"静音 + 音量 0"。
+    // 释放时静音是必要的（pause 在某些机型上有延迟，残余音频会漏出来），
+    // 但这是**临时状态**：重建播放实例时必须还原，否则画面在播、一点声音没有。
+    // 只记一次：重建过程中可能连着释放好几轮，第一轮记的才是用户真正设的值。
+    try { if (v.__vvMuted === undefined) v.__vvMuted = (v.muted === true); } catch (eM0) {}
+    try { if (v.__vvVol === undefined) v.__vvVol = (typeof v.volume === 'number' ? v.volume : 1); } catch (eV0) {}
     try { v.pause(); } catch (e1) {}
     // 释放后万一还有残余音频，静音能立刻止住（pause 在某些机型上有延迟）
-    try { v.muted = true; } catch (e2) {}
+    try {
+        v.__vvUsMuted = true;
+        v.muted = true;
+        VV._muteBy = 'hard';
+        VV._muteCount = (VV._muteCount || 0) + 1;
+    } catch (e2) {}
     try { v.volume = 0; } catch (e3) {}
     try { v.srcObject = null; } catch (e4) {}
     try { v.removeAttribute('src'); } catch (e5) {}
@@ -1057,8 +1224,28 @@ function vvHardReleaseVideo(v) {
     } catch (e8) {}
 }
 
+// 把 vvHardReleaseVideo / vvDetachMedia 为省资源临时压掉的音量还原回去。
+// 没有这一步，用户看到的现象就是"视频在播但没声音"——而且每次从后台切回来都会中一次。
+function vvRestoreAudio(v) {
+    if (!v) return false;
+    if (v.__vvMuted === undefined) return false;
+    try { VV._muteBy = 'restore'; VV._restoreCount = (VV._restoreCount || 0) + 1; } catch (eMk) {}
+    try {
+        // 静音照原样还原：用户本来就是静音看的，不能擅自开声音
+        v.muted = (v.__vvMuted === true);
+        try { VV._userMuted = (v.__vvMuted === true); } catch (eUM) {}
+        // 音量无条件还原：硬释放会把它压成 0，而"静音 + 音量 0"是两个开关，
+        // 只还原静音的话，用户后面一取消静音仍然是 0，看起来还是没声音。
+        var vol = (typeof v.__vvVol === 'number' && v.__vvVol > 0) ? v.__vvVol : 1;
+        if (!v.volume) v.volume = vol;
+    } catch (e0) {}
+    try { delete v.__vvMuted; delete v.__vvVol; } catch (e1) {}
+    return true;
+}
+
 function vvKillMedia() {
     vvDisarmStartWatchdog();
+    try { vvDisarmFrameWatch(); } catch (eFW) {}
     var act = VV.active;
     var inst = act && act.hls;
     // 先把引用断掉：destroy 抛错时也不会留下一个"看起来还在"的悬挂实例，
@@ -1243,13 +1430,20 @@ function vvBindVideo() {
         }
         if (VID.src && VID.src.indexOf('m3u8') < 0) {
             var code = VID.error && VID.error.code;
-            var isBlob = /^blob:/.test(VID.src);
-            if (isBlob) {
+            var msg = (VID.error && VID.error.message) || '';
+            // 用 _blobOnly 判断"这是页面自己的 MSE 句柄"，不能看 src 是不是 blob：
+            // 我们自己的 hls.js 也是走 blob 的，按 src 判会把正常播放误报成"页面私有流"。
+            if (act && act._blobOnly) {
                 vvShowErr('这条是页面自己 MSE 会话的句柄（blob），只能留在原页面播放器里用，独立播放器拿不到数据。', '这个视频源播不了');
+            } else if (code === 3 || (code === 4 && act && act.hls)) {
+                // MSE 管线已经建起来却解码失败：这是"拿不到解码器"，不是地址问题。
+                // 先说清原因，再自救一次（降到最低档 + 让别的页签让出解码器）。
+                if (vvCodecRescue('media-error')) return;
+                vvShowErr('解码失败：设备没有空闲的硬件解码器（同时打开的视频页签太多），或这个编码本机不支持。\n关掉几个视频页签后再点播放。', '解码器不够用');
             } else if (code === 4) {
                 vvShowErr('地址打不开（可能已过期、需要 Referer/Cookie，或是防盗链限制）。可以点「外部播放器」再试，或用页面自带的播放器。', '这个视频源播不了');
             } else {
-                vvToast('视频加载失败，可能需要防盗链或已失效', true);
+                vvToast('视频加载失败' + (msg ? '：' + msg.slice(0, 40) : '，可能需要防盗链或已失效'), true);
             }
         }
     });

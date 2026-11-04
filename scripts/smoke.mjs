@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -23,6 +23,10 @@ const elStub = () => ({
 
 const documentStub = {
     readyState: 'loading',
+    // 前后台判定要看这两个字段。默认"可见"：绝大多数用例都是前台场景，
+    // 需要模拟切走的用例自己把 hidden 置 true（见"硬证据"那一组）。
+    hidden: false,
+    visibilityState: 'visible',
     addEventListener() {},
     createElement() { return elStub(); },
     createDocumentFragment() { return { appendChild() {} }; },
@@ -41,7 +45,29 @@ winStub.location = { protocol: 'https:', hostname: 'example.com', href: 'https:/
 winStub.document = documentStub;
 winStub.navigator = {};
 winStub.performance = { getEntriesByType() { return []; } };
-winStub.localStorage = { _m: {}, getItem(k) { return k in this._m ? this._m[k] : null; }, setItem(k, v) { this._m[k] = v; }, removeItem(k) { delete this._m[k]; } };
+winStub.localStorage = {
+    _m: {},
+    getItem(k) { return k in this._m ? this._m[k] : null; },
+    setItem(k, v) { this._m[k] = String(v); },
+    removeItem(k) { delete this._m[k]; },
+    key(i) { const ks = Object.keys(this._m); return i >= 0 && i < ks.length ? ks[i] : null; },
+    get length() { return Object.keys(this._m).length; }
+};
+// media 原型：srcGuard 包的是 HTMLMediaElement.prototype.src 的 setter，
+// 沙箱里没有这个构造器的话，门禁装不上，测了也等于没测。
+winStub.HTMLMediaElement = class HTMLMediaElementStub {
+    constructor() { this._src = ''; }
+    get src() { return this._src; }
+    set src(v) { this._src = String(v == null ? '' : v); }
+    load() {}
+    pause() {}
+};
+winStub.HTMLSourceElement = class HTMLSourceElementStub {
+    constructor() { this._src = ''; }
+    get src() { return this._src; }
+    set src(v) { this._src = String(v == null ? '' : v); }
+};
+winStub.Element = class ElementStub { setAttribute() {} getAttribute() { return null; } };
 winStub.alert = function () {};
 winStub.addEventListener = function () {};
 winStub.innerWidth = 400;
@@ -375,10 +401,13 @@ eq('intent 分号被转义', /%3B/.test(T.buildIntent({ url: 'https://a/b;c.m3u8
 function fakeVideo(src, t) {
     return {
         src: src, currentSrc: src, currentTime: t || 0, paused: false, mediaKeys: null,
+        readyState: 4, muted: false, volume: 1,
         loaded: false, played: false, _attrs: {},
         getAttribute(k) { return this._attrs[k] === undefined ? null : this._attrs[k]; },
-        setAttribute(k, v) { this._attrs[k] = v; },
-        removeAttribute(k) { delete this._attrs[k]; },
+        // 和真实 DOM 一致：属性与 IDL 是联动的。摘掉 src 属性后 el.src 会变成 ''，
+        // 桩里如果还留着老值，测"有没有留下管线"就会永远算出 1 条。
+        setAttribute(k, v) { this._attrs[k] = v; if (k === 'src') this.src = v; },
+        removeAttribute(k) { delete this._attrs[k]; if (k === 'src') this.src = ''; },
         load() { this.loaded = true; },
         pause() { this.paused = true; },
         play() { this.played = true; return Promise.resolve(); },
@@ -392,17 +421,376 @@ const origQSA = documentStub.querySelectorAll;
 documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [fakeVideo2, fakeBlob] : []);
 T.hibernateMedia();
 eq('休眠摘掉了普通 video 的 src', fakeVideo2.getAttribute('src'), null);
-eq('休眠记下了原地址', T.VV._hib && T.VV._hib.length, 1);
-eq('休眠跳过了 blob 流', (T.VV._hib || []).some((x) => x.el === fakeBlob), false);
+// blob 只暂停不深拆：MSE 摘了就装不回去，后台切走就毁掉站点播放器不可接受。
+// 真正要抢解码器时（别的页签求让 / 本页解码失败）才由 releaseAllMedia 深拆。
+eq('休眠记下了普通流和 blob 流', T.VV._hib && T.VV._hib.length, 2);
+eq('休眠不深拆 blob（保留可恢复）', fakeBlob.loaded, false);
+eq('休眠把 blob 流暂停了', fakeBlob.paused, true);
+eq('休眠记下了 blob 原地址', (T.VV._hib || []).some((x) => x.el === fakeBlob && x.src === 'blob:https://a/xyz'), true);
+eq('休眠给 blob 流打了标记', (T.VV._hib || []).some((x) => x.el === fakeBlob && x.blob), true);
 eq('休眠记下了进度', T.VV._hib[0].t, 12);
 documentStub.querySelectorAll = origQSA;
 T.thawMedia();
 eq('解冻装回 src', fakeVideo2.src, 'https://cdn.a.com/v/2.mp4');
 eq('解冻后不重复挂起', T.VV._hib, null);
 
+// 保守模式：只暂停，不动 src（老设备/站点播放器一拆就废时的回退）
+{
+    const fv = fakeVideo('https://cdn.a.com/v/soft.mp4', 4);
+    const fb = fakeVideo('blob:https://a/soft', 4);
+    const q = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [fv, fb] : []);
+    T.setCfg('softHibernate', true);
+    T.VV._hib = null;
+    T.hibernateMedia();
+    eq('保守模式不拆 blob', fb.loaded, false);
+    eq('保守模式仍暂停 blob', fb.paused, true);
+    T.setCfg('softHibernate', false);
+    T.VV._hib = null;
+    documentStub.querySelectorAll = q;
+}
+
+// ---- 独占模式：非当前页不留任何解码器 ----
+// 这是"同时开十个页签，只有我看的那页能用"的核心约束。
+{
+    // 1) detach 必须连 <source> 子元素一起清。
+    //    只摘 video 的 src 属性再 load()，资源选择算法会重新去选 <source src>，
+    //    当场又挂一条管线——等于"拆了又装回去"，解码器一路没还。
+    const vs = fakeVideo('https://cdn.a.com/v/s.mp4', 7);
+    const child = { tagName: 'SOURCE' };
+    vs.firstChild = child;
+    vs.removeChild = function (c) { if (this.firstChild === c) this.firstChild = null; };
+    T.detachMedia(vs);
+    eq('detach 摘掉了 src 属性', vs.getAttribute('src'), null);
+    eq('detach 清掉了 <source> 子元素', vs.firstChild, null);
+    eq('detach 触发了 load', vs.loaded, true);
+    eq('detach 静音了元素', vs.muted, true);
+
+    // 2) 管线计数：只数"还挂着 src"的，不看暂停状态
+    const pv1 = fakeVideo('https://cdn.a.com/v/a.mp4', 1);
+    const pv2 = fakeVideo('', 0);
+    const qsa0 = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = () => [pv1, pv2];
+    eq('管线计数只数有 src 的', T.mediaPipelines(), 1);
+    T.VV._hib = null;
+    documentStub.querySelectorAll = qsa0;
+
+    // 3) 进后台不再看"全局活跃 >=3 路"：那是跨站不成立的判据。
+    //    只要判定为后台，一律深拆（含 blob/MSE）。
+    const blobBg = fakeVideo('blob:https://a/bg', 9);
+    const qsa1 = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [blobBg] : []);
+    T.setCfg('hibernate', true);
+    T.VV._bg = false;
+    T.VV._hib = null;
+    T.VV._releaseTotal = 0;
+    T.enterBg();
+    eq('后台无条件深拆 blob（不再等 3 路）', blobBg.getAttribute('src'), null);
+    eq('后台深拆后 load 过', blobBg.loaded, true);
+    eq('后台深拆计入统计', T.VV._releaseTotal > 0, true);
+
+    // 4) 播放门禁：只在"后台 + 独占模式"时拦
+    T.setBg(false);
+    eq('前台不拦起播', T.gateActive(), false);
+    T.setBg(true);
+    eq('后台拦起播', T.gateActive(), true);
+    T.setCfg('multiPlay', true);
+    eq('并行模式不拦起播', T.gateActive(), false);
+    T.setCfg('multiPlay', false);
+    T.setCfg('hibernate', false);
+    eq('关闭休眠后不拦起播', T.gateActive(), false);
+    T.setCfg('hibernate', true);
+
+    // 5) 巡检补漏：站点在后台把播放器又建起来，下一轮要再收走
+    const late = fakeVideo('blob:https://a/late', 5);
+    const qsa2 = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [late] : []);
+    T.VV._hib = null;
+    T.setBg(true);
+    T.sweep();
+    eq('巡检把后台新冒出来的管线收走', late.getAttribute('src'), null);
+    eq('巡检计数累加', T.VV._sweepCount > 0, true);
+
+    // 6) hasFocus 不可用时绝不能当判据：恒 false 的 WebView 会把自己拆掉
+    T.setBg(false);
+    T.setFocusEver(false);
+    eq('焦点信号不可用时不误判后台', T.tabHidden(), false);
+
+    T.VV._hib = null;
+    T.setBg(false);
+    documentStub.querySelectorAll = qsa2;
+}
+
+// ---- 失焦只是"辅助证据"，不能单独判后台 ----
+// 本地跑 UI 用例时踩过：hasFocus 长期为 false（无头环境、地址栏、系统弹窗都会），
+// 单靠它判定会让页面莫名其妙把自己拆掉，整条播放链路卡死。
+{
+    const q = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = () => [];
+    documentStub.hasFocus = () => false;
+    T.setFocusEver(true);
+    T.VV._noFocusAt = Date.now() - 5000;      // 假装已经失焦 5 秒
+    T.VV._peerFrontAt = 0;
+    T.VV._peerFrontSeen = false;
+    T.clearFront();
+    eq('失焦但没别的页在台前 → 不算后台', T.focusLostLong(), false);
+
+    T.announceFrontRaw('pOther', Date.now());
+    T.VV._peerFrontAt = 0;
+    eq('有别的页宣称在台前 → 失焦成立', T.focusLostLong(), true);
+
+    T.VV._peerFrontAt = 0;
+    T.clearFront();
+    T.announceFrontRaw(T.leaseId(), Date.now());
+    eq('只有自己的宣告不算数', T.focusLostLong(), false);
+
+    T.VV._peerFrontAt = 0;
+    T.clearFront();
+    T.announceFrontRaw('pOld', Date.now() - 60000);
+    eq('过期的宣告不算数', T.focusLostLong(), false);
+
+    T.clearFront();
+    T.VV._noFocusAt = 0;
+    T.setFocusEver(false);
+    documentStub.querySelectorAll = q;
+}
+
 eq('hibernate 配置默认开', T.cfg().hibernate, true);
 T.setCfg('hibernate', false);
 eq('hibernate 配置可切换', T.cfg().hibernate, false);
+T.setCfg('hibernate', true);
+
+// ---- 跨页"求让"= 真交还，不是挂起 ----
+// 设备级解码器只靠本页省是省不出来的：别的页签里站点自带的 MSE 播放器照样占着。
+// 收到求让必须把本页所有 media 都 detach（含 blob），并记下地址以便回填。
+{
+    const pv = fakeVideo('blob:https://a/peer2', 30);
+    const q = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [pv] : []);
+    T.setPlayerActive(false);
+    T.VV._hib = null;
+    T.VV._peerReleased = false;
+    const n = T.releaseAllMedia('test');
+    eq('求让拆掉了站点 MSE 播放器', pv.loaded, true);
+    eq('求让统计到 1 路', n, 1);
+    eq('求让标记已让位', T.VV._peerReleased, true);
+    eq('求让留了可恢复地址', (T.VV._hib || []).some((x) => x.el === pv && x.src === 'blob:https://a/peer2'), true);
+    T.VV._hib = null;
+    documentStub.querySelectorAll = q;
+}
+
+// ---- MSE 被深拆之后回前台：不能再把 blob 装回去 ----
+// 让位时 MediaSource 已经 closed，把同一个 blob: 重新赋给 <video> 只会得到
+// 一条"有管线、没数据"的假管线：pipelines 计数 +1、readyState 永远 0、画面全黑。
+// 既没恢复播放，又白占一个解码器槽位——正好和我们"只留当前页"的目标相反。
+{
+    const pv = fakeVideo('blob:https://a/peer3', 20);
+    const q = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [pv] : []);
+    T.VV._hib = null;
+    T.releaseAllMedia('test');
+    eq('MSE 让位：src 被摘掉', pv.getAttribute('src'), null);
+    T.thawMedia();
+    eq('MSE 解冻：不把已关闭的 blob 装回去', pv.getAttribute('src'), null);
+    eq('MSE 解冻：不留假管线', T.mediaPipelines(), 0);
+    T.VV._hib = null;
+    documentStub.querySelectorAll = q;
+}
+
+// ---- 后台页不许新建媒体管线（拦 src 赋值）----
+// play() 门禁挡不住自动连播/预加载：它们先 src=… 再 play()，管线在 play 之前就建好了。
+// 站点（尤其 hls.js 系）在后台会自己重建 MediaSource，我们拆一次它就建一次，
+// 形成拉锯——实测后台页的 pipelines 会在 0/1 之间来回跳。
+//
+// 但这道门禁是双刃的：拦错一次，站点就再也建不出管线，页面永远停在加载圈上。
+// 所以它只认"硬证据"——document 真的隐藏，或别的页签确实在台前。
+{
+    T.installSrcGuard();
+    T.clearFront();
+    T.setBg(true);
+    T.VV._peerFrontAt = 0;
+    const soft = new sandbox.window.HTMLMediaElement();
+    // 只是"判成了后台"（比如 rAF 停了 2 秒），页面其实还在前台看着：
+    // 这一条绝不能拦，否则页面直播播放器就永远起不来了。
+    soft.src = 'blob:https://a/soft';
+    eq('只有 _bg 没有硬证据：不拦建源', soft.src, 'blob:https://a/soft');
+    eq('只有 _bg 没有硬证据：不计入拦源数', (T.VV._gateSrcBlocked || 0), 0);
+
+    documentStub.hidden = true;
+    documentStub.visibilityState = 'hidden';
+    const mv = new sandbox.window.HTMLMediaElement();
+    mv.src = 'blob:https://a/auto';
+    eq('真·后台（document 隐藏）：设 src 被拦下（不建管线）', mv.src, '');
+    eq('真·后台：拦下装源的计数', (T.VV._gateSrcBlocked || 0) > 0, true);
+
+    documentStub.hidden = false;
+    documentStub.visibilityState = 'visible';
+    T.setBg(false);
+    mv.src = 'blob:https://a/front';
+    eq('回前台：设 src 放行', mv.src, 'blob:https://a/front');
+    mv.src = '';
+    eq('清空 src 永远放行', mv.src, '');
+    T.VV._gateSrcBlocked = 0;
+    T.VV._gateBlocked = 0;
+}
+// 换个硬证据再验一次：document 没隐藏，但别的页签在台前（Via 切页签不派发事件时就是这样）
+{
+    T.setBg(true);
+    T.clearFront();
+    T.VV._peerFrontAt = 0;
+    const a = new sandbox.window.HTMLMediaElement();
+    a.src = 'blob:https://a/nopeer';
+    eq('后台+无 peer 证据：不拦', a.src, 'blob:https://a/nopeer');
+    T.announceFrontRaw('peer-zz', Date.now());
+    T.VV._peerFrontAt = 0;
+    const b = new sandbox.window.HTMLMediaElement();
+    b.src = 'blob:https://a/withpeer';
+    eq('后台+别的页签在台前：拦下', b.src, '');
+    T.clearFront();
+    T.VV._peerFrontAt = 0;
+    T.VV._gateSrcBlocked = 0;
+    T.VV._gateBlocked = 0;
+    T.setBg(false);
+}
+{
+    const ov = fakeVideo('https://cdn.a.com/page.mp4', 8);
+    const q = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [ov] : []);
+    T.VV._pageMedia = [];
+    T.pausePageMedia();
+    eq('开播前拆掉本页原生视频', ov.loaded, true);
+    eq('开播前记下了恢复信息', T.VV._pageMedia.length, 1);
+    eq('开播前记下了地址', T.VV._pageMedia[0].src, 'https://cdn.a.com/page.mp4');
+    T.VV._pageMedia = [];
+    documentStub.querySelectorAll = q;
+}
+
+// ---- 后台 = 零解码器：这是"开几个页签后新页签能加载但播不动"的核心 ----
+// Via 这类壳切标签时不一定派发 visibilitychange，所以前后台判定要能靠 rAF 心跳兜底，
+// 而且一进后台就必须【立刻】把解码器交出去（不是 pause、也不是 20 秒后）。
+{
+    T.VV._rafSeen = true;
+    T.VV._rafLast = Date.now();
+    T.setFocusEver(false);
+    eq('rAF 在跳 = 前台', T.tabHidden(), false);
+
+    // 关键回归：重页面的一次长任务（首屏解析、瀑布流批量渲染）会让 rAF 断 1~2 秒。
+    // 旧逻辑 1.6 秒就判后台，于是拆解码器 + 拦建源，站点永久停在加载圈上——
+    // 用户看到的就是"这个网站一点就卡死"，而轻量站点怎么开都没事。
+    T.clearFront();
+    T.VV._peerFrontAt = 0;
+    T.VV._rafLast = Date.now() - 1200;
+    eq('rAF 断 1.2 秒（长任务中）：仍算前台', T.tabHidden(), false);
+    T.VV._rafLast = Date.now() - 5000;
+    eq('rAF 停 5 秒但没别的页在台前：仍算前台', T.tabHidden(), false);
+    T.announceFrontRaw('peer-raf', Date.now());
+    T.VV._peerFrontAt = 0;
+    eq('rAF 停了 + 别的页签在台前 = 后台（不依赖 visibilitychange）', T.tabHidden(), true);
+
+    // 造一个"播放器开着、正在放 m3u8"的现场
+    const pv = fakeVideo('blob:https://a/play', 30);
+    let stopped = 0, detached = 0, destroyed = 0;
+    const inst = {
+        stopLoad() { stopped++; }, detachMedia() { detached++; }, destroy() { destroyed++; },
+        levels: [], config: {}
+    };
+    T.setVid(pv);
+    T.setPlayerActive(true);
+    T.setActive({ item: { url: 'https://a/b.m3u8', type: 'HLS' }, hls: inst, _suspended: false });
+    T.VV._hlsPool = [];
+    T.enterBg();
+
+    // stopLoad 会被调两次（挂起一次、彻底释放再一次），幂等，不算问题
+    eq('进后台：hls 被 stopLoad', stopped >= 1, true);
+    eq('进后台：hls 被 detachMedia', detached, 1);
+    eq('进后台：hls 被 destroy', destroyed, 1);
+    eq('进后台：播放器 video 的 src 被摘掉', pv.getAttribute('src'), null);
+    eq('进后台：播放器 video 走了 load()', pv.loaded, true);
+    eq('进后台：记下续播位置', Math.round(T.VV.active._suspendT), 30);
+    eq('进后台：标记解码器已释放', T.VV.active._mediaReleased, true);
+    eq('进后台：状态机置后台', T.VV._bg, true);
+    eq('进后台：后台不重复释放', (T.enterBg(), destroyed), 1);
+}
+
+// 后台绝对不能再起播页面视频：一起播就又占一个解码器，而用户根本看不见
+{
+    const sv = fakeVideo('https://cdn.a.com/other.mp4', 8);
+    T.VV._pageMedia = [sv];
+    T.VV._pageMediaDeferred = [];
+    T.resumePageMedia();
+    eq('后台不重启页面视频', sv.played, false);
+    eq('后台把待恢复的视频存进 deferred', (T.VV._pageMediaDeferred || []).length, 1);
+    T.VV._rafLast = Date.now();
+    T.leaveBg();
+    eq('回前台后补上恢复', (T.VV._pageMediaDeferred || []).length, 0);
+    T.VV.playerActive = false;
+    T.VV.active = null;
+}
+
+// 跨页签求让：别的页签要开播，本页看到广播就把解码器交出去
+{
+    const pv2 = fakeVideo('blob:https://a/peer', 12);
+    let destroyed2 = 0;
+    T.setPageId('pMe');
+    T.setVid(pv2);
+    T.setPlayerActive(true);
+    T.setActive({ item: { url: 'https://a/c.m3u8', type: 'HLS' }, hls: { stopLoad() {}, detachMedia() {}, destroy() { destroyed2++; } }, _suspended: false });
+    T.VV._peerHandled = 0;
+    sandbox.localStorage.setItem('vvs:releaseReq', JSON.stringify({ ts: Date.now(), from: 'pOther' }));
+    T.peerSeen();
+    eq('看到别人的求让：销毁本页 hls', destroyed2, 1);
+    eq('看到别人的求让：摘掉本页 video 的 src', pv2.getAttribute('src'), null);
+    T.peerSeen();
+    eq('同一条求让只处理一次', destroyed2, 1);
+    T.setPlayerActive(false);
+    T.setActive(null);
+}
+
+// GM 脚本级通道：多开"不同视频站"时唯一可能通的协调通道
+// （localStorage 按 origin 隔离，十个不同站点互相完全看不见）
+{
+    const store = {};
+    sandbox.GM_setValue = (k, v) => { store[k] = v; };
+    sandbox.GM_getValue = (k, d) => (k in store ? store[k] : d);
+    T.setPageId('pGm');
+    T.requestPeer();
+    eq('求让同时写进 GM 通道', !!(store['vvbus'] && store['vvbus'].from === 'pGm'), true);
+
+    const pv3 = fakeVideo('blob:https://a/gm', 6);
+    T.setVid(pv3);
+    T.setPlayerActive(true);
+    T.setActive({ item: { url: 'https://a/c.m3u8', type: 'HLS' }, hls: { stopLoad() {}, detachMedia() {}, destroy() {} }, _suspended: false });
+    T.VV._peerHandled = 0;
+    T.VV._gmBusOk = false;
+    T.VV._hib = null;
+    store['vvbus'] = { ts: Date.now(), from: 'pOtherGm' };
+    T.peerSeen();
+    eq('GM 通道能收到别的页签的求让', T.VV._gmBusOk, true);
+    eq('GM 通道收到后同样交出解码器', pv3.getAttribute('src'), null);
+    T.setPlayerActive(false);
+    T.setActive(null);
+    delete sandbox.GM_setValue;
+    delete sandbox.GM_getValue;
+}
+
+// 解码器自救：最多两次，且第二次起钉在最低清晰度
+{
+    const rv = fakeVideo('https://cdn.a.com/x.mp4', 5);
+    T.setVid(rv);
+    T.setPlayerActive(true);
+    T.setActive({ item: { url: 'https://cdn.a.com/x.mp4', type: 'MP4' }, hls: null, _suspended: false });
+    const r1 = T.rescue('t1');
+    const r2 = T.rescue('t2');
+    const r3 = T.rescue('t3');
+    const r4 = T.rescue('t4');
+    // 三次而不是两次：别的页签从"失去焦点"到真正归还 MediaCodec 要几秒，
+    // 只试两次（间隔 0.9s）会在解码器还没空出来时就把页面判死。
+    eq('自救最多三次', [r1, r2, r3, r4], [true, true, true, false]);
+    eq('自救会钉最低清晰度', T.VV.active._forceLow, true);
+    eq('自救会记时间戳', typeof T.VV._lastRescue.ts, 'number');
+    T.setPlayerActive(false);
+    T.setActive(null);
+}
 
 // 关标签页 / 导航离开时的终极清理：这条路径不会进 closePlayer，页面一销毁就再没有
 // 任何定时器可用，所以必须同步把 hls 实例和 video 的解码器都还回去。
@@ -429,11 +817,150 @@ eq('hibernate 配置可切换', T.cfg().hibernate, false);
     eq('关标签页：清理时间戳写入', T.VV._lastTeardown > 0, true);
 
     // final（pagehide 非 bfcache）要防重入：重复触发不能二次 destroy 已换上的新实例
+    T.resetTeardown();
     let d2 = 0;
     T.VV._hlsPool = [{ stopLoad() {}, detachMedia() {}, destroy() { d2++; } }];
     T.hardTeardown(true);
     T.hardTeardown(true);
     eq('关标签页：final 清理只执行一次', d2, 1);
+
+    // 一次卸载过程里 beforeunload 与 pagehide 会先后各来一次。
+    // 两次都做全量释放 = 把同一件同步重活干两遍，几十个 <video> 的站点会明显拖慢关页签。
+    // 媒体只释放一轮，但定时器仍必须被 final 那次停掉。
+    T.resetTeardown();
+    let d3 = 0;
+    T.VV._hlsPool = [{ stopLoad() {}, detachMedia() {}, destroy() { d3++; } }];
+    T.hardTeardown(false);
+    T.hardTeardown(true);
+    eq('一次卸载：媒体只释放一轮', d3, 1);
+    eq('一次卸载：final 仍然停掉巡检', T.VV._focusTimer === 0 || T.VV._focusTimer == null, true);
+}
+
+// ---- 让出解码器不等于把声音关掉 ----
+// 释放那一刻必须静音（pause 在有些机型上是延迟生效的，残余音频会漏出来），
+// 但这是**临时状态**：装回去 / 重建播放实例时必须原样还原。
+// 少了这一步，用户看到的就是"画面在播、一点声音没有"，而且每次从后台切回来都中一次。
+{
+    const va = fakeVideo('https://cdn.a.com/v/snd.mp4', 6);
+    va.muted = false; va.volume = 1;
+    T.detachMedia(va);
+    eq('让出后临时静音', va.muted, true);
+    eq('让出记下了原静音状态', va.__vvMuted, false);
+    T.attachMedia(va, 'https://cdn.a.com/v/snd.mp4', 6, true, null, false);
+    if (va._onmeta) va._onmeta();
+    eq('装回后取消静音', va.muted, false);
+    eq('装回后音量恢复', va.volume, 1);
+
+    // 用户本来就是静音看的，装回来不能擅自开声音
+    const vm = fakeVideo('https://cdn.a.com/v/mute.mp4', 2);
+    vm.muted = true; vm.volume = 1;
+    T.detachMedia(vm);
+    T.attachMedia(vm, 'https://cdn.a.com/v/mute.mp4', 2, true, null, true);
+    if (vm._onmeta) vm._onmeta();
+    eq('原本静音的装回仍静音', vm.muted, true);
+
+    // 硬释放走的是 volume=0 那条路：只还原 muted 不够，音量也得抬回来
+    const vh = fakeVideo('blob:https://a/1', 0);
+    vh.muted = false; vh.volume = 1;
+    T.hardRelease(vh);
+    eq('硬释放临时静音', vh.muted, true);
+    eq('硬释放音量清零', vh.volume, 0);
+    T.restoreAudio(vh);
+    eq('还原后取消静音', vh.muted, false);
+    eq('还原后音量不为 0', vh.volume, 1);
+}
+
+
+// ---- 临时静音不能被当成"用户选择静音"记下来 ----
+// 让出解码器时我们会把元素临时 muted，如果这时再记录一次状态（休眠/换播放器），
+// 记下来的就是"用户要静音"，于是装回来之后永远是静音：画面在动、没声音。
+{
+    const v1 = fakeVideo('https://cdn.a.com/v/x.mp4', 3);
+    v1.muted = false;
+    T.detachMedia(v1);
+    eq('临时静音后记录到的仍是用户原值', T.origMuted(v1), false);
+
+    const v2 = fakeVideo('https://cdn.a.com/v/y.mp4', 3);
+    v2.muted = true;
+    eq('用户真静音时记录为静音', T.origMuted(v2), true);
+
+    // 临时静音状态下再走一遍"拆→装"，声音必须能回来
+    T.attachMedia(v1, 'https://cdn.a.com/v/x.mp4', 3, true, null, T.origMuted(v1));
+    if (v1._onmeta) v1._onmeta();
+    eq('临时静音态下重装仍是取消静音', v1.muted, false);
+}
+
+
+// ---- 前台声音自愈：漏掉的恢复路径由巡检兜底 ----
+// 真实 WebView 里"回到前台"的路径很多（visibilitychange / freeze-resume / bfcache /
+// 宿主自己的前后台切换），任何一条漏掉，用户就是"画面在动、没有声音"。
+// 所以除了各条路径自己还原，巡检里还要有一层幂等兜底。
+{
+    const v1 = fakeVideo('https://cdn.a.com/v/heal.mp4', 5);
+    const v2 = fakeVideo('https://cdn.a.com/v/keep.mp4', 5);
+    const v3 = fakeVideo('https://cdn.a.com/v/yield.mp4', 5);
+    const qsa = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = (sel) => (sel === 'video,audio' ? [v1, v2, v3] : []);
+    const keepHib = T.VV._hib;
+    T.VV._hib = null;
+    // 前面的用例可能留下 _bg / _yielded 状态，这里先摆正成"前台、没让位"
+    T.setBg(false);
+    T.VV._yielded = false;
+
+    // 被我们拆过（临时静音）的元素，在前台会被还原
+    v1.muted = false; v1.volume = 1;
+    T.detachMedia(v1);
+    eq('拆解后是静音态', v1.muted, true);
+    const n1 = T.restorePageAudio();
+    eq('自愈把被我们静音的元素还原', v1.muted, false);
+    eq('自愈计数为 1', n1, 1);
+    eq('自愈清掉标记', v1.__vvUsMuted, undefined);
+
+    // 用户本来就静音的，不能被自愈擅自开声
+    v2.muted = true; v2.volume = 1;
+    T.detachMedia(v2);
+    T.restorePageAudio();
+    eq('用户静音的元素保持静音', v2.muted, true);
+    eq('用户静音的元素标记也清掉', v2.__vvUsMuted, undefined);
+
+    // 让位态（这页已经把解码器给别人了）不许出声
+    v3.muted = false; v3.volume = 1;
+    T.detachMedia(v3);
+    T.VV._yielded = true;
+    const n3 = T.restorePageAudio();
+    eq('让位态不自愈', n3, 0);
+    eq('让位态仍是静音', v3.muted, true);
+    T.VV._yielded = false;
+    T.restorePageAudio();
+    eq('让位结束后自愈补上', v3.muted, false);
+
+    T.VV._hib = keepHib;
+    documentStub.querySelectorAll = qsa;
+
+    // 播放器自己的 <video>：用户没按静音就不该静着
+    const pv = fakeVideo('https://cdn.a.com/v/player.mp4', 5);
+    pv.muted = true; pv.volume = 0;
+    delete pv.__vvMuted;
+    T.setVid(pv);
+    T.setPlayerActive(true);
+    T.setActive({ vol: 0.8 });
+    T.setBg(false);
+    T.VV._yielded = false;
+    T.VV._userMuted = false;
+    const np = T.restorePlayerAudio();
+    eq('播放器自愈取消静音', pv.muted, false);
+    eq('播放器自愈恢复音量', pv.volume, 0.8);
+    eq('播放器自愈计数 > 0', np > 0, true);
+
+    // 用户自己按了静音，别抢
+    pv.muted = true;
+    T.VV._userMuted = true;
+    T.restorePlayerAudio();
+    eq('用户静音时播放器自愈不插手', pv.muted, true);
+    T.VV._userMuted = false;
+    T.setPlayerActive(false);
+    T.setVid(null);
+    T.setActive(null);
 }
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);

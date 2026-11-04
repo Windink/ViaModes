@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mumu-tab</title>
+<style>
+  html, body { margin: 0; background: #0b0b0f; color: #fff; font: 14px/1.5 -apple-system, sans-serif; }
+  #lab { padding: 6px 12px; font-size: 15px; background: #1b1b22; }
+  #lab b { color: #ffd54a; font-size: 20px; }
+  video { display: block; width: 100%; max-height: 38vh; background: #000; }
+  #stat { padding: 6px 12px; font: 12px/1.6 monospace; color: #7ef; white-space: pre-wrap; word-break: break-all; }
+  #hint { padding: 0 12px 10px; font-size: 11px; color: #888; }
+</style>
+</head>
+<body>
+<div id="lab">TAB <b id="tabid">?</b> <span id="sub" style="font-size:11px;color:#8ab"></span></div>
+<video id="v" muted autoplay loop playsinline></video>
+<div id="stat">…</div>
+<div id="hint">模拟「站点自带播放器」。m3u8 走 hls.js + MSE（blob:），和主流站点一致；mp4 直链对照。</div>
+
+<!-- 走 /dist/vv-<数字>.js 别名，避开 WebView 按路径缓存 -->
+<script src="/dist/vv-914.js"></script>
+<script src="/e2e/vendor/hls-r6.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var ID = q.get('id') || '?';
+  var D = Number(q.get('d') || 0);
+  var MAX = Number(q.get('max') || 0);          // 0 = 不开下一层
+  var OD = Number(q.get('od') || 1200);
+  var ALT = q.get('alt') || '';                 // 另一个源端口（跨源模拟）
+  var ORIGIN_PORT = q.get('op') || location.port;
+  var MODE = q.get('mode') || 'mp4';            // mp4 | hls
+  var IDX = (ID.charCodeAt(0) - 65) || 0;       // A=0, B=1 … 用来轮换取源
+  // rl=N：N 秒后自动刷新一次，用来复现"点重载"这条路径（同一个标签只刷一次）。
+  var RL = Number(q.get('rl') || 0);
+  if (RL > 0) {
+    var RL_KEY = 'vv:reloaded:' + ID;
+    var didRL = false;
+    try { didRL = sessionStorage.getItem(RL_KEY) === '1'; } catch (eR0) {}
+    if (!didRL) {
+      setTimeout(function () {
+        try { sessionStorage.setItem(RL_KEY, '1'); } catch (eR1) {}
+        try {
+          fetch('/__report', { method: 'POST', body: JSON.stringify({ id: ID, tag: 'reload', ts: Date.now() }) });
+        } catch (eR2) {}
+        try { location.reload(); } catch (eR3) {}
+      }, RL * 1000);
+    }
+  }
+  document.getElementById('tabid').textContent = ID + (MAX ? ' (d' + D + ')' : '');
+
+  // 每页取不同的流：真实环境是"不同视频源"，同一个文件会把 HTTP 缓存和
+  // 解码参数都拉平成一致，测不出真实压力。索引按标签字母轮换。
+  var MP4 = [
+    'media/bb720.mp4',
+    'media/bb1080.mp4',
+    'media/bb1080h265.mp4',
+    'flower.mp4'
+  ];
+  // 只留实测能在这台 WebView 里起播的源：Apple bipbop（fMP4）、mux pts_shift、
+  // 几个直播流在这里 readyState 一直是 0（封装/编解码不被支持），留着会让
+  // "前台那一路也没播"混进结论，分不清是我们的问题还是源的问题。
+  var HLS = [
+    // 同一台源站的 5 个清晰度变体：URL 不同（各页独立下载、独立解封装）、
+    // 码率从 240p 到 1080p 不同（解码压力不同），比"同一个文件开 8 次"
+    // 更接近"同时开 8 个不同视频网站"。全为 H.264/AAC，这台 WebView 能起播。
+    'https://test-streams.mux.dev/x36xhzz/url_8/193039199_mp4_h264_aac_fhd_7.m3u8',   // 1080p
+    'https://test-streams.mux.dev/x36xhzz/url_0/193039199_mp4_h264_aac_hd_7.m3u8',    // 720p
+    'https://test-streams.mux.dev/x36xhzz/url_6/193039199_mp4_h264_aac_hq_7.m3u8',    // 480p
+    'https://test-streams.mux.dev/x36xhzz/url_4/193039199_mp4_h264_aac_7.m3u8',       // 380p
+    'https://test-streams.mux.dev/x36xhzz/url_2/193039199_mp4_h264_aac_ld_7.m3u8'     // 240p
+  ];
+  var URLS = (MODE === 'hls') ? HLS : MP4;
+  var PICK = q.get('src') || URLS[IDX % URLS.length];
+
+  var v = document.getElementById('v');
+  var stat = document.getElementById('stat');
+  var sub = document.getElementById('sub');
+  var hls = null;
+  var attaches = 0;      // hls.js 装回 media 的次数（= 重建 MSE 解码器）
+  var detaches = 0;      // src 从有到无的次数
+  var hadSrc = false;
+
+  if (MODE === 'hls' && window.Hls && window.Hls.isSupported()) {
+    hls = new window.Hls({ lowLatencyMode: false, enableWorker: false, maxBufferLength: 12 });
+    hls.on(window.Hls.Events.MEDIA_ATTACHED, function () { attaches++; });
+    hls.on(window.Hls.Events.ERROR, function (e, data) {
+      // 站点播放器遇到致命错误会自己 recover——后台被拆后"复活"就走这条路。
+      if (data && data.fatal) {
+        try {
+          if (data.type === 'mediaError') hls.recoverMediaError();
+          else if (data.type === 'networkError') hls.startLoad();
+        } catch (e2) {}
+      }
+    });
+    hls.loadSource(PICK);
+    hls.attachMedia(v);
+  } else {
+    v.src = PICK;
+    try { v.load(); } catch (e) {}
+  }
+  // sound=1：起播后取消静音。<video muted> 只是为了过自动播放策略，
+  // 用来验证"我们的释放/恢复逻辑不会把站点视频弄成没声音"。
+  var SOUND = q.get('sound') === '1';
+  v.addEventListener('playing', function () {
+      if (SOUND && v.muted) v.muted = false;
+  });
+  // 起播可能失败（网络/这个变体不支持），所以再给一个不依赖 playing 的定时取消静音：
+  // 我们要观察的是"被我们拆过再装回来之后还有没有声音"，不是探针页能不能起播。
+  // 只在起播后 3 秒取消静音一次（模拟"用户点了站点的音量/站点默认有声"）。
+  // 不做周期同步：周期同步会把我们"临时静音"又覆盖掉，反而看不出究竟是谁还原的。
+  if (SOUND) setTimeout(function () { try { v.muted = false; } catch (e) {} }, 3000);
+  try { v.play().catch(function () {}); } catch (e) {}
+
+  // 200ms 采样 src 有无，统计"被拆掉又自己装回来"的次数。
+  setInterval(function () {
+    var now = !!v.getAttribute('src');
+    if (hadSrc && !now) detaches++;
+    hadSrc = now;
+  }, 200);
+
+  function snap(tag) {
+    var f = null, fErr = '';
+    try { f = window.__vv ? window.__vv.front() : null; } catch (e) { fErr = String(e && e.message || e); }
+    var buf = 0;
+    try {
+      for (var i = 0; i < v.buffered.length; i++) buf += v.buffered.end(i) - v.buffered.start(i);
+    } catch (eB) {}
+    var rec = {
+      id: ID, d: D, tag: tag, mode: MODE, ts: Date.now(),
+      vis: (function () { try { return document.visibilityState || ''; } catch (e) { return ''; } })(),
+      hidden: !!document.hidden,
+      hasFocus: (function () { try { return document.hasFocus(); } catch (e) { return null; } })(),
+      hasVV: !!window.__vv,
+      // 旧版脚本没有 __vv（那是后加的调试口），但一直有无条件的 __VV_DEBUG__。
+      // 只看 __vv 会把"脚本在跑但版本旧"误判成"脚本没注入"。
+      hasCore: !!window.__VV_DEBUG__,
+      fErr: fErr,
+      hlsLib: !!(window.Hls && window.Hls.isSupported && window.Hls.isSupported()),
+      ver: (function () { try { return window.__VV_DEBUG__.version || ''; } catch (e) { return ''; } })(),
+      bg: f ? f.bg : null,
+      gate: f ? f.gate : null,
+      blocked: f ? f.blocked : null,
+      blockedSrc: f ? f.blockedSrc : null,
+      muteBy: f ? f.muteBy : null,
+      muteCount: f ? f.muteCount : null,
+      restoreCount: f ? f.restoreCount : null,
+      hibCount: f ? f.hibCount : null,
+      sweep: f ? f.sweep : null,
+      pipelines: f ? f.pipelines : null,
+      why: f ? f.lastReleaseWhy : null,
+      noFocusMs: f ? f.noFocusMs : null,
+      rafGap: f ? f.rafGap : null,
+      vPaused: v.paused,
+      // 我们自己播放器的 <video>（它也在同一个 document 里），用来验证
+      // "用内置播放器看，切走再回来还有没有声音"。
+      pMuted: (function () { try { var p = document.querySelector('.vv-player-video'); return p ? p.muted : null; } catch (e) { return null; } })(),
+      pVol: (function () { try { var p = document.querySelector('.vv-player-video'); return p ? Math.round((p.volume || 0) * 100) / 100 : null; } catch (e) { return null; } })(),
+      pActive: !!(window.__vv && window.__vv.VV && window.__vv.VV.playerActive),
+      // 声音状态：解开"画面在动但没声音"这类问题必须看这两个值
+      vMuted: (function () { try { return v.muted; } catch (e) { return null; } })(),
+      vVol: (function () { try { return Math.round((v.volume || 0) * 100) / 100; } catch (e) { return null; } })(),
+      rl: RL,
+      sound: SOUND,
+      vSrc: v.getAttribute('src') ? 1 : 0,
+      vTime: Math.round((v.currentTime || 0) * 10) / 10,
+      vDur: Math.round((v.duration || 0) * 10) / 10,
+      vRs: v.readyState,
+      vw: v.videoWidth || 0,
+      vh: v.videoHeight || 0,
+      buf: Math.round(buf * 10) / 10,
+      attaches: attaches, detaches: detaches,
+      srcKind: (v.getAttribute('src') || '').indexOf('blob:') === 0 ? 'mse' : 'file',
+      src: (v.getAttribute('src') || '').slice(0, 90),
+      pick: PICK.slice(0, 90),
+      err: v.error ? v.error.code : 0
+    };
+    sub.textContent = 'hidden=' + rec.hidden + ' vis=' + rec.vis;
+    stat.textContent =
+      'bg=' + rec.bg + ' gate=' + rec.gate + ' blocked=' + rec.blocked + '/' + rec.blockedSrc +
+      ' muted=' + rec.vMuted + ' vol=' + rec.vVol + ' P[' + rec.pMuted + '/' + rec.pVol + ']' + ' by=' + rec.muteBy + '/' + rec.muteCount + ' rs' + rec.restoreCount + ' hib=' + rec.hibCount +
+      '  v' + rec.ver + (rec.hasCore ? '' : ' (无脚本)') + ' hls=' + (rec.hlsLib ? 1 : 0) + (rec.fErr ? ' ERR=' + rec.fErr : '') +
+      '\npipelines=' + rec.pipelines + ' sweep=' + rec.sweep + ' why=' + rec.why +
+      '\nsrc=' + rec.vSrc + '(' + rec.srcKind + ') t=' + rec.vTime + '/' + rec.vDur + ' rs=' + rec.vRs + ' buf=' + rec.buf +
+      '\natt=' + rec.attaches + ' det=' + rec.detaches + ' ' + rec.vw + 'x' + rec.vh +
+      '\n' + rec.pick;
+    document.title = 'T' + ID + ' bg=' + rec.bg + ' pip=' + rec.pipelines + ' b=' + rec.blocked;
+    try { fetch('/__report', { method: 'POST', body: JSON.stringify(rec) }); } catch (e) {}
+  }
+
+  setInterval(function () { snap('tick'); }, 2000);
+  document.addEventListener('visibilitychange', function () { snap('vis'); });
+  window.addEventListener('focus', function () { snap('focus'); });
+  window.addEventListener('blur', function () { snap('blur'); });
+  window.addEventListener('pagehide', function () { snap('pagehide'); });
+  setTimeout(function () { snap('boot'); }, 1200);
+
+  // 链条式开新标签：Via 是 singleTask，am start 开不出第二个标签，
+  // 每页开下一页是实测唯一稳定的多标签方式。
+  // alt=其它端口 时下一层换到另一个源，用来模拟"十个不同网站"（localStorage 互不可见）。
+  // 每层只开一次：刷新（location.reload）会把整段脚本重跑一遍，不记标记的话
+  // 点一次"重载"就再爬一遍链，凭空多出一串页签——这正是用户看到的那个现象。
+  // sessionStorage 在同一个标签页内 reload 后仍然保留，正好用来去重。
+  var CHAIN_KEY = 'vv:spawned:' + ID;
+  var SPAWNED = false;
+  try { SPAWNED = sessionStorage.getItem(CHAIN_KEY) === '1'; } catch (eSp) {}
+  if (MAX && !SPAWNED && D + 1 < MAX) {
+    try { sessionStorage.setItem(CHAIN_KEY, '1'); } catch (eSp2) {}
+    setTimeout(function () {
+      var nid = nextId(ID);
+      var next = '', oErr = '', w = null;
+      try {
+        var common = '?id=' + nid + '&d=' + (D + 1) + '&max=' + MAX + '&od=' + OD + '&vvdebug=1&mode=' + MODE + (SOUND ? '&sound=1' : '');
+        if (ALT) {
+          var toPort = (location.port === ALT) ? ORIGIN_PORT : ALT;
+          next = location.protocol + '//' + location.hostname + ':' + toPort + location.pathname +
+                 common + '&alt=' + ALT + '&op=' + ORIGIN_PORT;
+        } else {
+          next = location.pathname + common;
+        }
+      } catch (e1) { oErr = 'build:' + (e1 && e1.message); }
+      try { w = window.open(next, '_blank'); } catch (e2) { oErr += ' open:' + (e2 && e2.message); }
+      try {
+        fetch('/__report', { method: 'POST', body: JSON.stringify({
+          id: ID, tag: 'open', next: nid, to: next, origin: location.origin,
+          ok: !!w, err: oErr, ts: Date.now()
+        }) });
+      } catch (e3) {}
+    }, OD);
+  }
+  function nextId(s) {
+    // A->B->C …（超过 26 层就加后缀，测试用不到那么多）
+    var c = s.charCodeAt(0);
+    return String.fromCharCode(c + 1);
+  }
+})();
+</script>
+</body>
+</html>

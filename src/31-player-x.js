@@ -124,9 +124,23 @@ function vvApplyBrightness(pct) {
 function vvApplyVolume(pct) {
     try {
         pct = Math.max(0, Math.min(1, pct));
+        // 手势调音量一律视为"取消静音"：不然上一轮为省解码器做的临时静音
+        // 会把用户这一下抬手吞掉，看起来像"滑了没反应"。
+        try { VID.muted = false; } catch (eM) {}
+        try { VV._userMuted = false; } catch (eUM) {}
         VID.volume = pct;
         if (VV.active) VV.active.vol = pct;
-        vvSetLazy('vol', pct);
+        // vol 只持久化非零值，0 单独记成静音开关。
+        // 只存 vol 的话，一次滑到底就会让"之后每一次打开都是静音"，
+        // 而界面上没有任何按钮能看出音量是 0——用户只会说"播着没声音"。
+        if (pct > 0.01) {
+            vvSetLazy('vol', pct);
+            vvSetLazy('mute', 0);
+            VV._userMuted = false;
+        } else {
+            vvSetLazy('mute', 1);
+            VV._userMuted = true;
+        }
     } catch (e) {}
 }
 
@@ -731,7 +745,7 @@ function vvDiagText() {
     var v = VID || {};
     var lines = [];
     var push = function (s) { lines.push(s); };
-    push('Via 视频播放诊断 v' + VV.version);
+    push('Via 视频播放诊断 v' + VV.version + (VV.build ? '  build ' + VV.build : ''));
     try { push('UA: ' + navigator.userAgent); } catch (e0) {}
     push('类型: ' + ((a.item && a.item.type) || '?') + '  倍速: ' + (v.playbackRate || 1) + 'x');
     push('画面: ' + (v.videoWidth || 0) + 'x' + (v.videoHeight || 0) + '  时长: ' + vvFmtTime(v.duration || 0));
@@ -828,6 +842,48 @@ function vvDiagText() {
         if (mem) push('JS 堆: ' + Math.round(mem.usedJSHeapSize / 1048576) + 'MB / ' + Math.round(mem.jsHeapSizeLimit / 1048576) + 'MB');
     } catch (eM) {}
     push('页面可见: ' + !document.hidden);
+    // 独占模式的现场：这一行是"为什么别的页不肯让出解码器"的唯一可靠答案。
+    // 三个信号全绿（visible + rAF 在跑 + 有焦点）的页面会一直认为自己在台前，
+    // 只有它自己不拆；这时要看别的页面这一行是不是也全绿（那就是多窗口/分屏场景，
+    // 靠 hasFocus 区分，需要持续失焦 4 秒才判定）。
+    try {
+        var visTxt = '';
+        try { visTxt = document.visibilityState || '?'; } catch (eV) {}
+        var focTxt = '未知';
+        try { focTxt = vvHasFocus() ? '有' : '无'; } catch (eF) {}
+        push('独占判定: ' + (VV._bg ? '后台（已交出解码器）' : '前台（持有解码器）') +
+            '  vis=' + visTxt + ' 焦点=' + focTxt +
+            (VV._focusEverTrue ? '' : '(不可用)') +
+            (VV._noFocusAt ? ' 已失焦' + Math.round((Date.now() - VV._noFocusAt) / 1000) + 's' : ''));
+        push('解码器: 本页管线 ' + vvMediaPipelineCount() + ' 条' +
+            '  已交还 ' + (VV._releaseTotal || 0) + ' 条' +
+            '  后台巡检 ' + (VV._sweepCount || 0) + ' 轮' +
+            '  拦下起播 ' + (VV._gateBlocked || 0) + ' 次' +
+            '（其中拦下装源 ' + (VV._gateSrcBlocked || 0) + ' 次）');
+        // 声音状态：排查"画面在动却听不到声音"时，这一行就能定性
+        // （是我们的临时静音没还原，还是站点自己在 muted）。
+        try {
+            var _pv = document.querySelector('.vv-player-video');
+            push('声音: ' + (_pv ? ('muted=' + _pv.muted + ' vol=' + (Math.round(_pv.volume * 100) / 100)) : '无播放器') +
+                '  存储 vol=' + vvGet('vol', 1) + ' mute=' + vvGet('mute', 0));
+        } catch (eSnd) {}
+        if (VV._lastReleaseAt) {
+            push('最近交还: ' + Math.round((Date.now() - VV._lastReleaseAt) / 1000) + 's 前（' + (VV._lastReleaseWhy || '?') + '）');
+        }
+        // 跨页通道是否真的通。"我看的那页独占"要靠别的页知道该让位，
+        // 而 localStorage 按域名隔离——十个不同视频站互相看不见。
+        // 这里显示到底走通了哪条通道；两条都没通就说明只能靠"失焦/停帧"各自判定。
+        push('跨页通道: ' + (VV._gmBusOk ? 'GM 脚本级（跨站可用）'
+            : VV._lsBusOk ? 'localStorage（仅同站）' : '尚未收到过其它页的通知'));
+        // 嗅探开销：判断"这站是本来就卡，还是被我们拖卡的"。
+        // 丢弃数不为 0 说明页面的 DOM 增速超过了我们的处理速度（瀑布流/弹幕/自动轮播的典型特征）。
+        // 省读是"没有去读的响应体次数"，被挡住的是 js/css/html 这类读了也没用的东西。
+        try {
+            push('嗅探开销: 条目 ' + VV.items.length +
+                '  DOM ' + (VV._moNodes || 0) + (VV._moDropped ? '(丢弃' + VV._moDropped + ')' : '') +
+                '  省读 ' + (VV._bodySkip || 0) + ' 次/' + Math.round((VV._bodySkipKb || 0) / 102.4) / 10 + 'MB');
+        } catch (eCost) {}
+    } catch (eX) {}
     return lines.join('\n');
 }
 

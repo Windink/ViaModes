@@ -7,3 +7,6 @@ node_modules/
 # 日志
 *.log
 .DS_Store
+
+# 本地测试临时产物（模拟器截图、探针上报）
+.tmp/

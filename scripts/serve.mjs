@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { createReadStream } from 'node:fs';
+import { createReadStream, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 
@@ -26,11 +26,40 @@ const TYPES = {
 http.createServer(async (req, res) => {
   try {
     let pathname = decodeURIComponent((req.url || '/').split('?')[0]);
+    // ---- 真机/模拟器探针上报 ----
+    // 多标签场景没法靠桌面自动化读页面状态（每个标签是独立 WebView），
+    // 所以让被测页面自己把状态 POST 回来，落成一行行 JSON 直接看时间线。
+    if (pathname === '/__report' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 200000) req.destroy(); });
+      req.on('end', () => {
+        try {
+          mkdirSync(join(root, '.tmp'), { recursive: true });
+          appendFileSync(join(root, '.tmp', 'report.log'), body.trim() + '\n');
+        } catch (e) {}
+        res.statusCode = 204;
+        res.end();
+      });
+      return;
+    }
+    if (pathname === '/__report/clear') {
+      try {
+        mkdirSync(join(root, '.tmp'), { recursive: true });
+        writeFileSync(join(root, '.tmp', 'report.log'), '');
+      } catch (e) {}
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.end('cleared');
+      return;
+    }
     if (pathname.endsWith('/')) pathname += 'index.html';
     // 破缓存别名：Via 按 URL 路径缓存子资源，加 ?t= 时间戳和 Cache-Control: no-store 都不管用，
     // 改了产品代码照样跑旧版（真机上排查了很久才发现）。测试页改用一个全新路径，
     // 服务器统一映射回构建产物，这样缓存永远命中不了。
     if (/^\/dist\/vv-\d+\.js$/.test(pathname)) pathname = '/dist/via-video-player.user.js';
+    // 测试页同理：Via 的 WebView 缓存是"按 URL 路径"的，带 ?t= 或 Cache-Control 都拦不住，
+    // 改了页面照样跑旧的（诊断字段都对不上，白测一轮）。用带版本号的路径别名强制换 key。
+    if (/^\/e2e\/mumu-tab-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/mumu-tab.html';
+    if (/^\/e2e\/vendor\/hls-[A-Za-z0-9._-]+\.js$/.test(pathname)) pathname = '/e2e/vendor/hls.min.js';
     // 防盗链测试端点：没有 Referer 一律 403，用来验证"外链自检"能识别出防盗链
     if (pathname === '/guard/stream.m3u8') {
         if (!req.headers.referer) {
@@ -43,6 +72,26 @@ http.createServer(async (req, res) => {
         res.setHeader('Cache-Control', 'no-store');
         res.end('#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-ENDLIST\n');
         return;
+    }
+    // 压测用的动态大响应：/__blob?kb=1500&ct=text/javascript&seed=mp4
+    // 用来复现"重站"场景（几十个 JS bundle、大 JSON 接口）。
+    // seed=mp4 时正文里掺满 .mp4 字样——专门验证"大响应即使含视频链接也不该被整份读进来"。
+    if (pathname === '/__blob') {
+      const q = new URL(req.url, 'http://x');
+      const kb = Math.min(8192, Math.max(1, Number(q.searchParams.get('kb')) || 1));
+      const ct = q.searchParams.get('ct') || 'text/plain; charset=utf-8';
+      const size = kb * 1024;
+      const line = q.searchParams.get('seed') === 'mp4'
+        ? Buffer.from('/media/clip-0001.mp4\n')
+        : Buffer.from('x'.repeat(63) + '\n');
+      const buf = Buffer.alloc(size);
+      for (let o = 0; o < size; o += line.length) line.copy(buf, o, 0, Math.min(line.length, size - o));
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Content-Length', String(size));
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-VV-Blob', String(size));
+      res.end(buf);
+      return;
     }
     const file = normalize(join(root, pathname));
     if (!file.startsWith(normalize(root))) {
