@@ -3,7 +3,7 @@
 // 一次性摊开，看嗅探与播放的覆盖面和缺口。
 // 用法：node scripts/site-matrix.mjs [--only=关键词] [--no-proxy]
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -19,44 +19,16 @@ const ARGS = process.argv.slice(2);
 const ONLY = (ARGS.find((a) => a.startsWith('--only=')) || '').split('=')[1] || '';
 const USE_PROXY = ARGS.includes('--use-proxy');
 
+// 站点清单不入库（避免公开仓库点名具体平台）：从 e2e/sites.local.json 读取。
+// 结构见 e2e/sites.example.json；复制一份填好 URL 即可。
+const SITE_FILE = new URL('../e2e/sites.local.json', import.meta.url);
+if (!existsSync(SITE_FILE)) {
+    console.error('缺少 e2e/sites.local.json。请复制 e2e/sites.example.json 并填入要实测的站点 URL。');
+    process.exit(1);
+}
 // 站点覆盖的分发策略是有意搭配的：
-const SITES = [
-    {
-        key: 'ch',
-        name: '某视频站点 · 点播',
-        url: 'https://video.example.com/2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml',
-        expect: '多码率 HLS + 多 CDN + blob(MSE)，强时效 token'
-    },
-    {
-        key: 'news',
-        name: '某新闻网 · 视频',
-        url: 'https://news.example.org/shipin/',
-        expect: '新闻站，多为直链 mp4 / 弱防护'
-    },
-    {
-        key: 'qq',
-        name: '某视频平台 · 剧集',
-        url: 'https://vod.example.net/x/cover/mzc002000s9f77y.html',
-        expect: 'blob + 加密 HLS/私有协议，强防盗链，需登录'
-    },
-    {
-        key: 'show',
-        name: '某综艺平台 · 综艺',
-        // 某综艺平台的详情页 id 会失效（跳 404），所以从首页/榜单页自动发现一条有效详情页
-        discover: {
-            url: 'https://show.example.com/',
-            pattern: '/b/[a-z0-9]+/\\d+\\.html'
-        },
-        url: '',
-        expect: 'HLS + token 鉴权，blob 播放'
-    },
-    {
-        key: 'film',
-        name: '某影视平台 · 影视',
-        url: 'https://film.example.com/',
-        expect: 'blob + 私有协议，强反爬'
-    }
-];
+const SITES = JSON.parse(await readFile(SITE_FILE, 'utf8')).matrix;
+mkdirSync('e2e/local', { recursive: true });
 
 function proxyArgs() {
     if (!USE_PROXY) return ['--no-proxy-server'];
@@ -127,7 +99,7 @@ for (const site of SITES) {
 
     await page.evaluateOnNewDocument(scriptSrc);
 
-    // 详情页 id 会失效的站（某综艺平台等）：先在首页/榜单页找一条有效链接，再进详情页
+    // 详情页 id 会失效的站：先在首页/榜单页找一条有效链接，再进详情页
     if (site.discover) {
         const dg = await gotoWithRetry(page, site.discover.url, 2);
         if (dg.ok) {
@@ -297,7 +269,7 @@ for (const site of SITES) {
 
     // 截图留证
     try {
-        await page.screenshot({ path: `e2e/site-${site.key}.png` });
+        await page.screenshot({ path: `e2e/local/site-${site.key}.png` });
         console.log('截图: e2e/site-' + site.key + '.png');
     } catch (e) {}
 
@@ -338,7 +310,7 @@ for (const r of results) {
     console.log(pad(r.name, 20) + pad('ok', 6) + pad(sniffTxt, 20) + pad(playTxt, 10) + pad(uiTxt, 10) + dash);
 }
 
-await writeFile('e2e/site-matrix.json', JSON.stringify(results, null, 2), 'utf8');
+await writeFile('e2e/local/site-matrix.json', JSON.stringify(results, null, 2), 'utf8');
 console.log('');
 console.log('明细已写入 e2e/site-matrix.json');
 await browser.close();

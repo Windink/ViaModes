@@ -1,7 +1,7 @@
 // m3u8 专项实测：只跑 HLS 站点（直播 / 点播 / 多码率），验证嗅探 → 起播 → 进度 UI 全链路。
 // 用法：node scripts/hls-site-test.mjs [--only=关键词]
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -16,32 +16,15 @@ const BROWSERS = [
 const ARGS = process.argv.slice(2);
 const ONLY = (ARGS.find((a) => a.startsWith('--only=')) || '').split('=')[1] || '';
 
-const SITES = [
-    {
-        key: 'ch1-live',
-        name: '某视频站点 · 频道 1 直播',
-        url: 'https://video.example.com/live/ch1/',
-        expect: '直播 HLS：多码率主清单 + ts 分片，无 duration（live 边界）'
-    },
-    {
-        key: 'ch2-live',
-        name: '某视频站点 · 频道 2 直播',
-        url: 'https://video.example.com/live/ch2/',
-        expect: '直播 HLS，CDN 与 频道 1 不同（v.kcdnvip.com）'
-    },
-    {
-        key: 'sports-live',
-        name: '某体育平台 · 体育直播',
-        url: 'https://sports.example.com/',
-        expect: '直播 + 点播混合 HLS，带 msisdn token'
-    },
-    {
-        key: 'ch-vod',
-        name: '某视频站点 · 点播（对照）',
-        url: 'https://video.example.com/2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml',
-        expect: 'VOD 多码率 HLS，有 duration（对照组）'
-    }
-];
+// 站点清单不入库（避免公开仓库点名具体平台）：从 e2e/sites.local.json 的 hls 段读取。
+// 结构见 e2e/sites.example.json；复制一份填好 URL 即可。
+const SITE_FILE = new URL('../e2e/sites.local.json', import.meta.url);
+if (!existsSync(SITE_FILE)) {
+    console.error('缺少 e2e/sites.local.json。请复制 e2e/sites.example.json 并填入要实测的站点 URL。');
+    process.exit(1);
+}
+const SITES = JSON.parse(await readFile(SITE_FILE, 'utf8')).hls;
+mkdirSync('e2e/local', { recursive: true });
 
 const scriptSrc = await readFile('dist/via-video-player.user.js', 'utf8');
 
@@ -216,7 +199,7 @@ for (const site of SITES) {
     }
 
     try {
-        await page.screenshot({ path: 'e2e/hls-' + site.key + '.png' });
+        await page.screenshot({ path: 'e2e/local/hls-' + site.key + '.png' });
         console.log('截图: e2e/hls-' + site.key + '.png');
     } catch (e) {}
 
@@ -247,7 +230,7 @@ for (const r of results) {
     const note = r.play && r.play.dur === null ? 'live(无时长)' : '';
     console.log(pad(r.name, 22) + pad(sniffTxt, 22) + pad(playTxt, 12) + pad(uiTxt, 16) + note);
 }
-await writeFile('e2e/hls-sites.json', JSON.stringify(results, null, 2), 'utf8');
+await writeFile('e2e/local/hls-sites.json', JSON.stringify(results, null, 2), 'utf8');
 console.log('');
 console.log('明细: e2e/hls-sites.json');
 await browser.close();

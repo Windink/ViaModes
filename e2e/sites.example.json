@@ -1,0 +1,48 @@
+{
+  "_说明": "复制为 e2e/sites.local.json 后填入要实测的站点。脚本只读 sites.local.json，此文件仅作字段示例。",
+  "_字段": {
+    "key": "短标识，用于 --only= 过滤和结果文件名",
+    "name": "显示名，仅供输出可读",
+    "url": "直接打开的页面地址；留空表示需要先 discover",
+    "expect": "预期分发策略，仅作为结果对照的备注",
+    "discover": "可选。url 为首页/榜单页，pattern 为正则字符串，用于从页面链接里挑一条有效详情页"
+  },
+  "matrix": [
+    {
+      "key": "sample-vod",
+      "name": "示例站点 · 点播",
+      "url": "https://example.com/watch/1",
+      "expect": "多码率 HLS + 多 CDN + blob(MSE)"
+    },
+    {
+      "key": "sample-news",
+      "name": "示例站点 · 新闻",
+      "url": "https://example.org/video/",
+      "expect": "直链 mp4 / 弱防护"
+    },
+    {
+      "key": "sample-discover",
+      "name": "示例站点 · 需发现详情页",
+      "url": "",
+      "discover": {
+        "url": "https://example.net/",
+        "pattern": "/b/[a-z0-9]+/\\d+\\.html"
+      },
+      "expect": "HLS + token 鉴权"
+    }
+  ],
+  "hls": [
+    {
+      "key": "sample-live",
+      "name": "示例站点 · 直播",
+      "url": "https://example.com/live/1/",
+      "expect": "直播 HLS：多码率主清单 + ts 分片，无 duration"
+    },
+    {
+      "key": "sample-vod-hls",
+      "name": "示例站点 · 点播（对照）",
+      "url": "https://example.com/watch/1",
+      "expect": "VOD 多码率 HLS，有 duration"
+    }
+  ]
+}

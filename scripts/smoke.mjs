@@ -159,7 +159,7 @@ eq('plain mp4 kept', T.push({ url: 'https://g.com/movie.mp4', type: 'MP4', name:
 eq('seg name without root kept', T.push({ url: 'https://h.com/main.mp4', type: 'MP4', name: 'main' }), true);
 
 // ===== 列表排序：不能靠"到达顺序"决定第一条（真实站点实测暴露的问题） =====
-// 某视频站点一次会吐出 /asp/hls/（视频）、/asp/hlsaudio/（音轨）、/asp/audio/…/mp3/（音频）
+// 多码率站点一次会吐出 /asp/hls/（视频）、/asp/hlsaudio/（音轨）、/asp/audio/…/mp3/（音频）
 // 和一条 blob:，抓取顺序随机；若按到达顺序 unshift，用户点第一条就可能黑屏。
 eq('rank mp4 最靠前', T.itemRank({ type: 'MP4', url: 'https://a.com/v.mp4' }) < T.itemRank({ type: 'HLS', url: 'https://a.com/main.m3u8' }), true);
 eq('rank 视频 m3u8 早于音轨', T.itemRank({ type: 'HLS', url: 'https://a.com/hls/main.m3u8' }) < T.itemRank({ type: 'HLS', url: 'https://a.com/hlsaudio/main.m3u8' }), true);
@@ -184,13 +184,13 @@ eq('音轨不在前两位', T.VV.items.slice(0, 2).some(i => i.url.indexOf('hlsa
 eq('blob 排最后', T.VV.items[T.VV.items.length - 1].type, 'BLOB');
 
 // ===== 进度记忆 key：跨 CDN / 跨清单变体必须稳定 =====
-// 某视频站点同一个视频有多条清单（enc/hls/hlsaudio/audio）且每次换 CDN 域名，
+// 多 CDN 站点同一个视频有多条清单（enc/hls/hlsaudio/audio）且每次换 CDN 域名，
 // 用 host+path 做 key 会让进度永远记不住。
-eq('key 用视频 ID（去 CDN 域名）', T.videoKey('https://cdn10.example.com/asp/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'),
+eq('key 用视频 ID（去 CDN 域名）', T.videoKey('https://cdn-a.example.com/asp/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'),
     'id:738e9fd675ae41779b5f221b61213e56');
 eq('key 跨 CDN 一致',
-    T.videoKey('https://cdn9.example.com/asp/enc/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'),
-    T.videoKey('https://cdn11.example.com/asp/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'));
+    T.videoKey('https://cdn-b.example.com/asp/enc/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'),
+    T.videoKey('https://cdn-c.example.net/asp/hls/main/0303000a/3/default/738e9fd675ae41779b5f221b61213e56/main.m3u8'));
 eq('key 跨清单变体一致（视频/音轨共享进度）',
     T.videoKey('https://a.com/asp/hls/main/738e9fd675ae41779b5f221b61213e56/main.m3u8'),
     T.videoKey('https://a.com/asp/hlsaudio/hls/main/738e9fd675ae41779b5f221b61213e56/main.m3u8'));

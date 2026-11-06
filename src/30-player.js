@@ -122,7 +122,7 @@ function vvStopPlayerTop() {
 function vvVideoKey(url) {
     // 进度记忆的 key。这里刻意【不用】媒体域名：
     // 多 CDN 的站点同一个视频每次刷新会换 CDN 域名
-    // （cdn12.example.com / cdn11.example.com / cdn10.example.com …），
+    // （同一份清单在几个不同的 CDN 主机名下轮换），
     // 用 host+path 做 key 会让同一个视频每次都被当成新视频，进度永远记不住。
     try {
         var u = new URL(url);
@@ -299,7 +299,7 @@ function vvEnsurePlayerRoot() {
     LOADBAR.innerHTML = '<div class="vv-loadbar-fill"></div>';
     LOADFILL = LOADBAR.querySelector('.vv-loadbar-fill');
 
-    // 起播失败卡片。很多站（某综艺平台的一次性 pm token、某影视平台的纯 blob 流）在第三方播放器里
+    // 起播失败卡片。很多站（一次性 token 鉴权、纯 blob 流）在第三方播放器里
     // 必然拉不到流；原来只弹一条 toast 就消失，用户看到的是"黑屏 + 一直转圈"。
     // 这里给一个持久卡片，写清原因并给出退路（重试 / 外部播放器 / 返回）。
     ERRBOX = vvEl('div', 'vv-err');
@@ -526,8 +526,8 @@ function vvShowLoadBar(on) {
 
 // ---- 起播失败卡片 ----
 // 为什么需要它：不少站点的视频源在第三方播放器里根本拉不到
-//   · 某综艺平台：m3u8 带一次性 pm token，页面播放器消费后第三方再请求必 403
-//   · 某影视平台：只用 blob:（MSE 会话句柄），离开原页面就失效
+//   · 一次性 token 鉴权：m3u8 里的 token 被页面播放器消费后，第三方再请求必 403
+//   · 纯 blob:（MSE 会话句柄）：离开原页面上下文就失效
 // 原来只弹一条 toast，2 秒后消失，用户看到的是黑屏 + 无限转圈，不知道该干什么。
 function vvShowErr(msg, title) {
     try {
@@ -566,7 +566,7 @@ function vvArmStartWatchdog() {
                 }
                 var why;
                 if (code === 403 || netFail >= 3) {
-                    why = '源站拒绝了请求（' + (code ? 'HTTP ' + code : '多次连接失败') + '）。很多站点（如某综艺平台）的播放地址是一次性鉴权的，被页面播放器用过之后第三方就无法复用。';
+                    why = '源站拒绝了请求（' + (code ? 'HTTP ' + code : '多次连接失败') + '）。不少站点的播放地址是一次性鉴权的，被页面播放器用过之后第三方就无法复用。';
                 } else if (act._blobOnly) {
                     why = '该页面只用浏览器内部的视频流（blob），离开页面上下文就无法播放。';
                 } else {
@@ -1089,7 +1089,7 @@ function vvLoadMedia(item) {
                         try { hc = (data.response && data.response.code) || 0; } catch (eC1) {}
                         if (hc === 403 || hc === 401) {
                             try { if (VV.active) VV.active._lastHttpCode = hc; } catch (eC2) {}
-                            vvShowErr('源站返回 HTTP ' + hc + '，拒绝第三方播放。这类站点（如某综艺平台、部分影视站）的播放地址是一次性鉴权的，被页面播放器用掉后无法复用。可以点「外部播放器」试试，或直接在页面里播放。', '这个视频源播不了');
+                            vvShowErr('源站返回 HTTP ' + hc + '，拒绝第三方播放。这类站点的播放地址常是一次性鉴权的，被页面播放器用掉后无法复用。可以点「外部播放器」试试，或直接在页面里播放。', '这个视频源播不了');
                             try { inst.stopLoad(); } catch (eC3) {}
                             return;
                         }

@@ -13,3 +13,17 @@ node_modules/
 
 # 研究/分析流程的中间产物
 产物/
+
+# 实测站点清单与结果（含具体站点信息，不入库；结构见 e2e/sites.example.json）
+e2e/sites.local.json
+e2e/local/
+
+# 针对特定站点的一次性调试脚本（本地保留，不入库）
+scripts/diag-live.mjs
+scripts/hls-cfg-test.mjs
+scripts/hls-csp-test.mjs
+scripts/hls-diag.mjs
+scripts/hls-levels.mjs
+scripts/hls-probe.mjs
+scripts/leak-test.mjs
+scripts/live-ui.mjs

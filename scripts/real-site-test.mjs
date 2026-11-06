@@ -1,6 +1,7 @@
 // 真实网站测试：把构建好的用户脚本注入真实网页，验证嗅探 + 播放 + 加载进度。
-// 用法：node scripts/real-site-test.mjs [url]
-// 默认用 MDN 的 <video> 元素示例页（直链 mp4，页面自带 video 标签）。
+// 用法：node scripts/real-site-test.mjs [url | 站点 key]
+// 目标站点从 e2e/sites.local.json 的 matrix 段读取（不入库，结构见 e2e/sites.example.json）；
+// 也可以直接把 URL 作为参数传入。
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
@@ -22,17 +23,24 @@ const BROWSERS = [
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 ];
 
-const SITES = [
-    // 某视频站点（ch）点播页：国内正规平台，真实多码率 HLS（main.m3u8 内含 2000/1200/450 三档），
-    // 页面用 MSE + blob: 播放，是 Via 上最典型的场景，也能验画质切换。
-    { name: '某视频站点 · 视频点播（多码率 HLS）', url: 'https://video.example.com/2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml' },
-    // 某新闻网：主流新闻门户，页面直接带 <video>
-    { name: '某新闻网 · 首页视频', url: 'https://news.example.org/' },
-    // 某媒体网站视频频道
-    { name: '某媒体网站 · 视频频道', url: 'http://media.example.org/' }
-];
-
-const site = process.argv[2] ? { name: process.argv[2], url: process.argv[2] } : SITES[0];
+// 站点清单不入库（避免公开仓库点名具体平台）
+const SITE_FILE = new URL('../e2e/sites.local.json', import.meta.url);
+const ARG = process.argv[2] || '';
+let site;
+if (/^https?:\/\//i.test(ARG)) {
+    site = { name: ARG, url: ARG };
+} else {
+    if (!existsSync(SITE_FILE)) {
+        console.error('缺少 e2e/sites.local.json。请复制 e2e/sites.example.json 并填入目标地址，或直接传 URL。');
+        process.exit(1);
+    }
+    const usable = JSON.parse(await readFile(SITE_FILE, 'utf8')).matrix.filter((s) => s.url);
+    site = ARG ? usable.find((s) => s.key === ARG) : usable[0];
+    if (!site) {
+        console.error(`没有可用的站点：${ARG ? '找不到 key ' + ARG : 'matrix 里没有带 url 的条目'}`);
+        process.exit(1);
+    }
+}
 
 function proxyArgs() {
     // 本机有全局代理（127.0.0.1:58426），媒体 CDN 走代理会 ERR_TUNNEL_CONNECTION_FAILED，
