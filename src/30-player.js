@@ -121,13 +121,13 @@ function vvStopPlayerTop() {
 
 function vvVideoKey(url) {
     // 进度记忆的 key。这里刻意【不用】媒体域名：
-    // 多 CDN 的站点（某视频站点、腾讯、B 站等）同一个视频每次刷新会换 CDN 域名
+    // 多 CDN 的站点同一个视频每次刷新会换 CDN 域名
     // （cdn12.example.com / cdn11.example.com / cdn10.example.com …），
     // 用 host+path 做 key 会让同一个视频每次都被当成新视频，进度永远记不住。
     try {
         var u = new URL(url);
         var path = u.pathname || '';
-        // 1) 路径里带视频 ID（32 位 hex 或 UUID，如某视频站点 guid、多数站的 vid）：
+        // 1) 路径里带视频 ID（32 位 hex 或 UUID，如某些站的 guid、多数站的 vid）：
         //    直接用它做 key。同一个视频往往有多个清单变体
         //    （/asp/enc/hls/…、/asp/hls/…、/asp/hlsaudio/…），它们路径不同但 guid 相同，
         //    用 guid 才能让这些变体共享同一份进度。
@@ -911,7 +911,7 @@ function vvCanNativeHls() {
 }
 
 // 优先用构建时内联的标准版 hls.js：很多站点会往页面里注入自家魔改版并覆盖 window.Hls
-// （某电视台是 1.6.7-ch 定制版），第三方再拿它 new 实例时行为完全不可控，常见表现就是
+// （页面注入的是定制版），第三方再拿它 new 实例时行为完全不可控，常见表现就是
 // 主清单能解析、分片却永远进不了 SourceBuffer，最后只剩黑屏。
 function vvPickHlsCtor() {
     try {

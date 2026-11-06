@@ -16,13 +16,23 @@ const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '20-ui.js', '30-p
 // 变了就把 patch 位 +1，并把 build 时间一起写进头部，方便一眼核对装的哪版。
 let body = '';
 
+// hls.js 以 Apache-2.0 分发，第 4(a) 条要求向接收方提供许可证副本与版权声明。
+// 原始 min 文件不带 banner，这里在产物中补上保留型注释（/*! 开头，压缩工具默认保留），
+// 仓库内 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 存放许可证全文。
+// 只加注释、不改 vendor 文件本身，因此不需要按 4(b) 标注"修改过的文件"。
+const HLS_BANNER = '/*! hls.js 1.7.3 | Copyright (c) 2017 Dailymotion (http://www.dailymotion.com)'
+    + ' | Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)'
+    + ' | https://github.com/video-dev/hls.js'
+    + ' | 本副本为官方 dist/hls.light.min.js 原样内联，未修改；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */';
+
 if (existsSync('vendor/hls.light.min.js')) {
     const size = (await statSync('vendor/hls.light.min.js')).size;
     if (size > 20000) {
         let vendor = await readFile('vendor/hls.light.min.js', 'utf8');
         body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://unpkg.com/hls.js@1/dist/hls.light.min.js"];\n';
+        body += HLS_BANNER + '\n';
         body += '(function(){try{' + vendor + '}catch(e){}})();\n';
-        // 站点常在之后注入自家魔改版 hls.js（某电视台的 1.6.7-ch 就是），会覆盖 window.Hls。
+        // 站点常在之后注入自家魔改版 hls.js（页面自带的定制构建就是），会覆盖 window.Hls。
         // 先把我们这份干净的标准版引用抓在全局上，播放时优先用它，避免被页面定制版接管。
         body += 'try{ if (window.Hls) window.__vvHlsCtor = window.Hls; }catch(e){}\n';
         console.log('vendor hls.js inlined:', size, 'bytes');

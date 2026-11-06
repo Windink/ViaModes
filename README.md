@@ -13,8 +13,8 @@
 - 识别 `mp4 / m3u8 / webm / mkv / flv / mov / avi / mp3 等音视频` 与 blob 原生流
 - m3u8 自动识别主清单，合并各码率/音轨/字幕子清单；主清单 body 因 CORS/代理读不到时，也会用 `master/manifest/playlist.m3u8` 的目录登记过滤子目录变体（如 Apple `v2/prog_index.m3u8`）；同时过滤 HLS 的 fMP4 分片（`main.mp4 / init.mp4 / seg-1.mp4`），列表只留可播放的一条，不刷屏
 - 自动去重，悬浮角标显示嗅探数量，可拖动换边
-- 列表按「能不能播」排序，而不是按抓到的先后：直链 → 视频主清单 → 音轨清单 → `blob:`。嗅探到达顺序本身就是随机的（同一个某视频站点页面两次加载，第一条可能在视频清单和音轨清单之间跳），按到达顺序排会让用户点开就是黑屏
-- 音轨清单单独标注 `m3u8·音轨`：某视频站点这类站点会同时吐出 `/asp/hls/`（视频）和 `/asp/hlsaudio/`、`/asp/audio/…/mp3/`（音轨），不标出来用户分不清为什么只有声音
+- 列表按「能不能播」排序，而不是按抓到的先后：直链 → 视频主清单 → 音轨清单 → `blob:`。嗅探到达顺序本身就是随机的（同一页面两次加载，第一条可能在视频清单和音轨清单之间跳），按到达顺序排会让用户点开就是黑屏
+- 音轨清单单独标注 `m3u8·音轨`：有的站点会同时吐出 `/asp/hls/`（视频）和 `/asp/hlsaudio/`、`/asp/audio/…/mp3/`（音轨），不标出来用户分不清为什么只有声音
 - `blob:` 永远排最后：它只是页面自己 MSE 会话的句柄，脱离原上下文单独播放必然是 `readyState=0` 的白屏，不能占第一位
 - 点开角标 → 底部列表：▶ 内置播放器播放 / ⭳ 下载 / ⧉ 导出给外部播放器
 
@@ -126,8 +126,8 @@
   - 顶部细进度条：等待数据时横向推进，m3u8 缓冲不足时留在顶部提示
   - 直链按字节比计算真实百分比；m3u8 无"总大小"概念，按"已缓冲时长 / 15s 目标缓冲"换算
 - **起播失败卡片**（不是黑屏）：源站 401/403（一次性鉴权、防盗链）、只有 `blob:` 流、12s 起播超时，都会弹出带原因的卡片，并给出「重试 / 外部播放器 / 返回」三个出口。像某综艺平台（`pm` token 被页面播放器先消费）、某影视平台（纯 `blob:`）这类站点在原理上就无法被第三方播放器接管，明确告知比无限转圈有用
-- **进度记忆**：跨站点记住每个视频位置并自动续播。key 用视频 ID（路径里的 32 位 hex / UUID）而不是域名——多 CDN 站点（某视频站点、腾讯等）同一个视频每次刷新都换 CDN 域名，用域名做 key 会导致进度永远记不住；用 ID 还能让同一视频的视频清单 / 加密清单 / 音轨清单共享同一份进度
-- **标题**：m3u8 的文件名常常没有信息量（某视频站点所有清单都叫 `main.m3u8`），这类通用名（`main/index/playlist/master/…`）会自动改用页面标题，否则标题栏就显示一个"main"
+- **进度记忆**：跨站点记住每个视频位置并自动续播。key 用视频 ID（路径里的 32 位 hex / UUID）而不是域名——多 CDN 站点同一个视频每次刷新都换 CDN 域名，用域名做 key 会导致进度永远记不住；用 ID 还能让同一视频的视频清单 / 加密清单 / 音轨清单共享同一份进度
+- **标题**：m3u8 的文件名常常没有信息量（有的站点所有清单都叫 `main.m3u8`），这类通用名（`main/index/playlist/master/…`）会自动改用页面标题，否则标题栏就显示一个"main"
 - **锁屏**防误触；控制栏 4.5 秒自动隐藏；底部菜单打开期间不自动收起，点画面任意空白处即可关闭
 - **片头/片尾标记**：手动标记一次，之后自动跳过
 - **连播**：自动识别 URL 数字规律（`cand.m3u8` → `cand2.m3u8`）/ 同页下一集链接，播完自动继续
@@ -485,7 +485,7 @@ Android 15 / x86_64 / 系统 WebView 110、Via 7.3.3。
 
 截图：`e2e/screenshot-badge.jpg`（角标）、`e2e/screenshot-panel.jpg`（列表）、`e2e/screenshot-mp4.jpg`、`e2e/screenshot-hls.jpg`、`e2e/share-probe.png`（外链自检）、`e2e/bench-mp4.png`、`e2e/bench-hls.png`、`e2e/load-pct.png`（加载进度确定态）、`e2e/load-indet.png`（不确定态）。
 
-### 真实站点实测（某视频站点点播页，国内正规平台）
+### 真实站点实测（某视频站点播页，国内正规平台）
 
 目标：`video.example.com/2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml`（《一诺无悔》第 1 集，45:23）。这是国内典型的真实场景：页面自己用 MSE + `blob:` 播放，m3u8 走多 CDN 轮换，且一次吐出视频主清单 / 加密清单 / 音轨等多条清单。
 
@@ -567,8 +567,8 @@ scripts/ui-verify.mjs  UI/交互层功能矩阵（真实 Touch/Mouse 事件：�
 scripts/audio-check.mjs  声音专项回归（起播有声 / 后台交还再回来 / 关掉重开 / 历史 vol=0 自救 / 主动静音不被抢 / 站点播放器拆装 / **真实标签切换**，22 项）
 scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→bench→截图→加载进度截图）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
-scripts/real-site-test.mjs  注入真实站点（默认某视频站点点播页）验证嗅探/播放/加载进度/seek/倍速/画质/续播
-scripts/site-matrix.mjs  多站点分发策略矩阵（某电视台/中新/腾讯/某综艺平台/某影视平台），逐站出「嗅探→起播→进度UI」结论
+scripts/real-site-test.mjs  注入真实站点（默认某视频站点播页）验证嗅探/播放/加载进度/seek/倍速/画质/续播
+scripts/site-matrix.mjs  多站点分发策略矩阵，逐站出「嗅探→起播→进度UI」结论
 scripts/bench.mjs  性能基准（本地 mp4 对照 + 公网 HLS），落两张截图
 scripts/share-shot.mjs  截图「外部播放器」浮层与自检结果
 scripts/load-shot.mjs  截图「加载进度」确定态与不确定态
@@ -582,7 +582,7 @@ node scripts/e2e-verify.mjs   # 无头 Chrome 真机链路验证（需 puppeteer
 node scripts/ui-verify.mjs    # UI 交互功能矩阵（98 项）
 node scripts/audio-check.mjs  # 声音专项回归（含真实标签切换，22 项）
 node scripts/test-all.mjs     # 一键跑全套（7 阶段）
-node scripts/real-site-test.mjs  # 真实站点实测（默认某视频站点，需外网）
+node scripts/real-site-test.mjs  # 真实站点实测（需外网）
 node scripts/serve.mjs    # 另开终端，然后浏览器打开 http://localhost:8099/e2e/
 ```
 
@@ -601,4 +601,15 @@ node scripts/android-close-tab.mjs --mode=hls     # 同上，走 MSE 路径
 
 ## License
 
-MIT
+本项目代码采用 MIT 许可。
+
+### 第三方组件
+
+- **hls.js 1.7.3** — Copyright (c) 2017 Dailymotion，Apache License 2.0。
+  `vendor/hls.light.min.js` 是官方 `dist/hls.light.min.js` 的原样内联副本，未作修改；
+  构建时会在产物中补上保留型注释 banner（`/*! … */`），载明版权、许可与来源。
+  许可证全文见 `vendor/LICENSE-hlsjs`（hls.js 自身声明，含对 video.js HLS 库派生部分的说明）
+  与 `vendor/LICENSE-Apache-2.0`（Apache License 2.0 全文）。
+
+  hls.js 内部的 `src/remux/mp4-generator.js` 与 `src/demux/exp-golomb.ts` 的实现派生自
+  videojs-contrib-hls，Copyright (c) 2013-2015 Brightcove，同样以 Apache 2.0 授权。

@@ -296,7 +296,7 @@ function vvFmtSpeed(kbps) {
 }
 
 // m3u8/mp4 的通用文件名没有任何信息量：
-// 某视频站点所有清单都叫 main.m3u8，直接显示标题栏就是一堆 "main"，用户完全看不出在播什么。
+// 有的站点所有清单都叫 main.m3u8，直接显示标题栏就是一堆 "main"，用户完全看不出在播什么。
 var VV_GENERIC_NAME = /^(?:main|index|master|manifest|playlist|media|video|movie|stream|chunklist|prog_index|out|output|hls|live|default|source|file|test|\d{1,4})$/i;
 
 function vvPageTitle() {
@@ -541,7 +541,7 @@ function vvResolve(rawUrl, contentType) {
 }
 
 // 是否是"纯音频"的 HLS 清单（只有声音没有画面）。
-// 某视频站点这类站点会同时吐出 /asp/hls/…（视频）、/asp/hlsaudio/…（音轨）、
+// 有的站点会同时吐出 /asp/hls/…（视频）、/asp/hlsaudio/…（音轨）、
 // /asp/audio/…/mp3/…（音频）多个主清单，点错就变黑屏，必须在列表里降权。
 function vvLooksLikeAudioHls(url) {
     var p = String(url || '').toLowerCase();
@@ -605,7 +605,7 @@ function vvPushItem(item) {
     item.foundAt = Date.now();
     item.uid = 'vv' + (Date.now().toString(36)) + (Math.random() * 1e6 | 0).toString(36);
     // 按"可信度"插入，而不是永远插到最前：
-    // 嗅探到达顺序是随机的（某视频站点两次加载，首条可能在 enc / hlsaudio 之间跳），
+    // 嗅探到达顺序是随机的（同一页面两次加载，首条可能在 enc / hlsaudio 之间跳），
     // 若按到达顺序排，用户点第一条就可能点到纯音频清单（黑屏）或 blob 死链。
     // 规则：rank 小的靠前；同 rank 内新的在前（保持原有的"最近发现"直觉）。
     var myRank = vvItemRank(item);
