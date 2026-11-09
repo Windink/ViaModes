@@ -7,7 +7,7 @@ const SRC = 'src';
 const OUT = 'dist/via-video-player.user.js';
 const VER_FILE = '.version';
 const HASH_FILE = '.tmp/build.hash';
-const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '45-pagefs.js', '46-episodes.js', '50-boot.js'];
+const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '12-autoplay.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '45-pagefs.js', '46-episodes.js', '50-boot.js'];
 
 // ---- 版本号必须每次改动都变 ----
 // Via 的「更新」是按 @version 比较的，版本号不动 = 永远不更新。

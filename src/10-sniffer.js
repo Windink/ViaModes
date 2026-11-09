@@ -197,6 +197,8 @@ function vvCheckMediaNode(n) {
             vvPushItem(vvResolve(n.currentSrc, ''));
         }
         if (tag === 'video') vvWatchVideoEl(n);
+        // 顺手把页面视频的 preload="auto" 降级，避免没起播也整段预载（见 12-autoplay.js）
+        if (tag === 'video') { try { vvApTamePreload(n); } catch (eA) {} }
     } catch (e) {}
 }
 

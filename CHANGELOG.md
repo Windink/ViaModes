@@ -17,6 +17,25 @@
 
 ## 未发布
 
+## v0.1.64 — 2026-11-09
+
+### 新增
+
+- 网页原生视频自动播放拦截（`12-autoplay.js`）：很多站点一进页面就自动起播，在 Android
+  WebView 里会立刻占住一条硬件解码器（MediaCodec）并开始拉流——用户还没打算看，既白费
+  流量，又让随后打开的内置播放器抢不到解码。现在在 document-start 包住
+  `HTMLMediaElement.prototype.play`：对页面自己的 `<video>`，没有真实用户手势时直接返回
+  `NotAllowedError`（和浏览器自动播放策略表现一致，站点播放器会退回收起/待点播）；另加
+  `play` 事件兜底，拦住带 `autoplay` 属性、不经过 `play()` 的起播，并摘掉 `autoplay` 防重试。
+  页面视频显式写了 `preload="auto"` 的降到 `metadata`（能拿时长/首帧，不整段预载），
+  用户一碰页面就还原。只治页面 video，不碰音频与内置播放器；跨域 iframe 内的视频不在
+  本脚本作用域（脚本本来只跑顶层帧）
+- 更多菜单「网页视频自动播放」开关（配置项 `pageAutoplay`，默认关 = 拦截）。关着时站点
+  不再自动起播；想恢复站点行为可直接打开。`vvAttachMedia` / `vvResumePageMediaNow` 的
+  恢复链路走一次性放行，不会把自己恢复的页面视频又拦掉
+- `__vv.apState()` / `__vv.apRestorePreload()` 两个排查入口：看拦了几次、钩子状态与当前
+  是否放行
+
 ## v0.1.63 — 2026-11-09
 
 ### 修复

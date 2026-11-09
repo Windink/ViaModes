@@ -70,7 +70,11 @@ var VV = {
         epAutoPlay: vvGet('epAutoPlay', true),
         // 播放态低特效：关掉菜单/加载框的大面积 backdrop-filter。真机实测半屏 blur(20px)
         // 会把平均帧间隔从 16.7ms 拉到 22.3ms、长帧率从 0.2% 拉到 29.9%，默认开（省电）。
-        lowFx: vvGet('lowFx', true)
+        lowFx: vvGet('lowFx', true),
+        // 网页原生视频自动播放：默认关（拦截站点自动起播）。站点一进页面就起播会在
+        // WebView 里直接占住一条硬件解码器并开始拉流，既费流量，又让内置播放器抢不到解码。
+        // 语义：true = 允许网页自动播放；false = 等用户点播放。
+        pageAutoplay: vvGet('pageAutoplay', false)
     }
 };
 

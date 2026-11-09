@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,setGesture:function(ts){VV_AP.lastGesture=ts;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -56,11 +56,15 @@ winStub.localStorage = {
 // media 原型：srcGuard 包的是 HTMLMediaElement.prototype.src 的 setter，
 // 沙箱里没有这个构造器的话，门禁装不上，测了也等于没测。
 winStub.HTMLMediaElement = class HTMLMediaElementStub {
-    constructor() { this._src = ''; }
+    constructor() { this._src = ''; this._attrs = {}; this.played = 0; this.pausedCount = 0; this.nodeName = 'VIDEO'; }
     get src() { return this._src; }
     set src(v) { this._src = String(v == null ? '' : v); }
+    getAttribute(k) { return this._attrs[k] === undefined ? null : this._attrs[k]; }
+    setAttribute(k, v) { this._attrs[k] = String(v); }
+    removeAttribute(k) { delete this._attrs[k]; }
     load() {}
-    pause() {}
+    pause() { this.pausedCount++; }
+    play() { this.played++; return Promise.resolve(); }
 };
 winStub.HTMLSourceElement = class HTMLSourceElementStub {
     constructor() { this._src = ''; }
@@ -1286,6 +1290,65 @@ T.setBarPct(bar, 'width', 0);
 eq('进度条：0% 边界', barStyle.width, '0%');
 T.setBarPct(null, 'width', 50);
 eq('进度条：元素为空不抛错', true, true);
+
+// ---- 网页自动播放拦截：不让站点一进页面就抢解码器/带宽 ----
+{
+    eq('网页自动播放：默认关闭（拦截站点起播）', T.cfg().pageAutoplay, false);
+    eq('网页自动播放：play 钩子已装', T.apState() && T.apState().hooked, true);
+
+    // 页面自己的视频，无手势起播 → 拒掉并暂停
+    const pv = new sandbox.window.HTMLMediaElement();
+    pv.nodeName = 'VIDEO';
+    const before = T.apState().blocked;
+    pv.play().catch(function () {});
+    eq('无手势起播：计入拦截', T.apState().blocked, before + 1);
+    eq('无手势起播：不进入播放', pv.played, 0);
+    eq('无手势起播：被暂停', pv.pausedCount, 1);
+
+    // 用户点过页面后放行
+    const pv2 = new sandbox.window.HTMLMediaElement();
+    pv2.nodeName = 'VIDEO';
+    T.setGesture(Date.now());
+    pv2.play();
+    eq('有用户手势：放行', pv2.played, 1);
+    T.setGesture(0);
+
+    // 配置里主动允许自动播放时完全不拦
+    T.setCfg('pageAutoplay', true);
+    const pv3 = new sandbox.window.HTMLMediaElement();
+    pv3.nodeName = 'VIDEO';
+    pv3.play();
+    eq('配置允许自动播放：不拦', pv3.played, 1);
+    T.setCfg('pageAutoplay', false);
+
+    // 内置播放器（在 ROOT 里）永远不拦
+    let ours = null;
+    T.setRoot({ contains: function (x) { return x === ours; } });
+    ours = new sandbox.window.HTMLMediaElement();
+    ours.nodeName = 'VIDEO';
+    ours.play();
+    eq('内置播放器：不拦', ours.played, 1);
+    T.setRoot(null);
+
+    // 恢复页面媒体的一次性放行
+    const pv5 = new sandbox.window.HTMLMediaElement();
+    pv5.nodeName = 'VIDEO';
+    T.apAllowNext(pv5);
+    pv5.play();
+    eq('恢复链路一次性放行：可播', pv5.played, 1);
+
+    // preload=auto 降级为 metadata，手势后还原
+    const pv6 = new sandbox.window.HTMLMediaElement();
+    pv6.nodeName = 'VIDEO';
+    pv6.setAttribute('preload', 'auto');
+    T.apTame(pv6);
+    eq('页面视频 preload=auto：降级为 metadata', pv6.getAttribute('preload'), 'metadata');
+    const qOld = documentStub.querySelectorAll;
+    documentStub.querySelectorAll = function (sel) { return sel === 'video' ? [pv6] : qOld.call(documentStub, sel); };
+    T.apRestore();
+    documentStub.querySelectorAll = qOld;
+    eq('用户手势后：preload 还原为 auto', pv6.getAttribute('preload'), 'auto');
+}
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

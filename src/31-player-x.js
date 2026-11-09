@@ -1058,6 +1058,20 @@ function vvMenuSheet() {
             return false;
         }
     });
+    // 开关语义是「开 = 允许网页自动播放」，配置项同名；默认关
+    items.push({
+        label: '网页视频自动播放',
+        sub: '关掉后站点播放器不再一进页面就起播，等你点播放',
+        switch: true,
+        on: !!VV.cfg.pageAutoplay,
+        act: function () {
+            VV.cfg.pageAutoplay = !VV.cfg.pageAutoplay;
+            vvSet('pageAutoplay', VV.cfg.pageAutoplay);
+            if (VV.cfg.pageAutoplay) { try { vvApRestorePreload(); } catch (e0) {} }
+            vvToast('网页自动播放已' + (VV.cfg.pageAutoplay ? '开启' : '关闭'));
+            return false;
+        }
+    });
     // 「画面」组按实际内容决定是否出现：直链 mp4 既没有档位也没有音轨，
     // 先推表头会留下一个空分组
     var visual = [];

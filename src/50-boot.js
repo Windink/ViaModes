@@ -54,6 +54,11 @@ function vvMain() {
                 // 播放态低特效：只读状态与手动切换，供真机帧率探针复验
                 lowFxSync: vvSyncLowFx,
                 lowFxToggle: vvToggleLowFx,
+                // 网页自动播放拦截：拦了几次、钩子装上没有、当前是否放行
+                apState: function () {
+                    try { return { blocked: VV_AP.blocked, hooked: VV_AP.hooked, allow: vvApCfgOn() }; } catch (e) { return null; }
+                },
+                apRestorePreload: function () { try { vvApRestorePreload(); } catch (e) {} },
                 leaseWrite: function (id, ts) {
                     try {
                         if (!ts) { localStorage.removeItem(VV_LEASE_PREFIX + id); return; }

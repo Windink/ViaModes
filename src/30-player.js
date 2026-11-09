@@ -240,6 +240,7 @@ function vvResumePageMediaNow(list) {
                 // 没被摘过 src 的（保守模式 / 后来自己恢复了）：直接接着播
                 var hasSrc = vvHasSrc(el);
                 if (hasSrc) {
+                    try { vvApAllowNext(el); } catch (eA) {}
                     try { el.play().catch(function () {}); } catch (e1) {}
                     return;
                 }

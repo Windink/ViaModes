@@ -866,7 +866,7 @@ function vvAttachMedia(el, src, t, autoplay, onFail, muted) {
             if (!el.volume) el.volume = (typeof el.__vvVol === 'number' && el.__vvVol > 0) ? el.__vvVol : 1;
         } catch (eV) {}
         try { delete el.__vvMuted; delete el.__vvVol; } catch (eDel) {}
-        if (autoplay) { try { el.play().catch(function () {}); } catch (eP) {} }
+        if (autoplay) { try { vvApAllowNext(el); } catch (eA) {} try { el.play().catch(function () {}); } catch (eP) {} }
     }
     function bad() {
         if (done) return;
