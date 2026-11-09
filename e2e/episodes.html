@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>选集测试台 · Via Video Player</title>
+<style>
+    body { font-family: system-ui, sans-serif; margin: 16px; color: #222; }
+    h1 { font-size: 18px; }
+    p { font-size: 12px; color: #666; line-height: 1.6; }
+    #eps { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; margin: 12px 0 20px; }
+    #eps a { display: block; padding: 8px 4px; text-align: center; font-size: 12px; text-decoration: none;
+        color: #245; background: #eef3ff; border: 1px solid #ccd8f5; border-radius: 8px; }
+    .noise a { display: inline-block; margin: 0 6px 6px 0; padding: 5px 8px; font-size: 11px;
+        color: #765; background: #fff4e6; border: 1px solid #ecd7b8; border-radius: 6px; }
+    video { width: 300px; max-width: 100%; background: #000; }
+</style>
+</head>
+<body>
+<h1>选集测试台</h1>
+<p>模拟影视站：24 集同模板链接（用 #ep=N 做锚点，点集数不会重载页面，方便自动化观察），
+外加外域推荐位 / 预告 / 年份 / 分页导航等干扰链接。当前集默认为第 3 集。</p>
+
+<div id="eps"></div>
+<div class="noise" id="noise"></div>
+<p>下面这条 video 用于让嗅探先有一条结果，也用来打开内置播放器：</p>
+<video controls preload="metadata" src="/e2e/flower.mp4"></video>
+
+<script>
+// 剧集链接：href 与当前页 ?vvdebug=1 保持一致，只有锚点里的集号不同
+(function () {
+    var box = document.getElementById('eps');
+    for (var i = 1; i <= 24; i++) {
+        var a = document.createElement('a');
+        a.href = '?vvdebug=1#ep=' + i;
+        a.textContent = '第' + i + '集';
+        box.appendChild(a);
+    }
+    var noise = document.getElementById('noise');
+    function add(text, href) {
+        var a = document.createElement('a');
+        a.href = href; a.textContent = text;
+        noise.appendChild(a);
+    }
+    add('第25集（外域推荐位）', 'https://other.example.com/play/25.html');
+    add('第99集 预告', '?vvdebug=1#ep=99');
+    add('2026年11月', '?vvdebug=1#ep=x');
+    add('1', '/e2e/page/1.html');
+    add('2', '/e2e/page/2.html');
+    add('3', '/e2e/page/3.html');
+})();
+</script>
+<script src="../dist/via-video-player.user.js"></script>
+</body>
+</html>

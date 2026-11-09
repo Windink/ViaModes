@@ -232,6 +232,11 @@ function vvShareClose() {
 function vvShareOpen(item) {
     if (!item || !item.url) { vvToast('没有可分享的链接', true); return; }
     vvShareClose();
+    // 从嗅探面板的「导出」按钮进来时把面板收起：两层全屏遮罩叠着，
+    // 面板的置顶巡检还会把分享浮层挪到自己下面（看着像界面自动关闭）。
+    try {
+        if (VV._panelOpen && vvUI && vvUI.panel) vvUI.panel.close();
+    } catch (eP) {}
     var wrap = vvEl('div', 'vv-share-wrap');
     wrap.id = 'vv-share-wrap';
     var box = vvEl('div', 'vv-share');
@@ -319,4 +324,16 @@ function vvShareOpen(item) {
     // 角标是 fixed + 最高层级，会压在浮层按钮上，直接藏掉
     try { var b = vvBadge(); if (b) b.style.display = 'none'; } catch (eT) {}
     try { if (typeof vvBringToFront === 'function') vvBringToFront(wrap); } catch (eB) {}
+    // 点「导出 .m3u」时 Via 会弹系统下载界面，页面短暂进入后台；回来后
+    // 角标/面板可能又排到了浮层前面，把浮层重新压回最上层，别让用户以为它关了。
+    if (!VV._shareVisBound) {
+        VV._shareVisBound = true;
+        try {
+            document.addEventListener('visibilitychange', function () {
+                if (document.hidden) return;
+                var w = document.getElementById('vv-share-wrap');
+                if (w) vvBringToFront(w);
+            });
+        } catch (eV) {}
+    }
 }

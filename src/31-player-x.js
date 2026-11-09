@@ -254,6 +254,8 @@ function vvBindGestures() {
 }
 
 function vvGesStart(e) {
+    // 页内小窗里交给 vvMiniDrag*：全屏的亮度/音量/seek 手势在 240px 宽下只会误触
+    if (VV._mini) { vvG.pass = false; return; }
     if (!VV.active) return;
     try {
         if (vvInCtrlZone(e.target)) { vvG.pass = true; return; }
@@ -288,6 +290,7 @@ function vvGesStart(e) {
 }
 
 function vvGesMove(e) {
+    if (VV._mini) { vvG.pass = false; return; }
     if (!VV.active || vvG.pass) return;
     try {
         var t = e.touches[0];
@@ -330,6 +333,7 @@ function vvGesMove(e) {
 }
 
 function vvGesEnd(e) {
+    if (VV._mini) { vvG.pass = false; return; }
     if (!VV.active || vvG.pass) { vvG.pass = false; return; }
     try {
         clearTimeout(vvG.longTimer);
@@ -1007,6 +1011,19 @@ function vvMenuSheet() {
             return false;
         }
     });
+    items.push({
+        label: '选集',
+        sub: (function () {
+            var d = vvEpisodesScan();
+            var n = d.page.length + d.media.length;
+            return n ? '本页找到 ' + n + ' 集' : '本页还没认出剧集列表';
+        })(),
+        icon: 'list',
+        act: function () {
+            vvEpisodesOpen();
+            return false;
+        }
+    });
     items.push({ group: '设置' });
     // 布尔项改用开关控件：状态由控件本身表达，不再往标题里拼「：开/关」
     items.push({
@@ -1091,6 +1108,15 @@ function vvMenuSheet() {
         items = items.concat(visual);
     }
     items.push({ group: '工具' });
+    items.push({
+        label: VV._mini ? '退出页内小窗' : '页内小窗（悬浮播放）',
+        sub: '系统画中画不可用时也能边看边刷页面，可拖动',
+        icon: 'pip',
+        act: function () {
+            vvMiniWindow(!VV._mini, 'direct');
+            return false;
+        }
+    });
     items.push({
         label: '复制链接',
         icon: 'link',

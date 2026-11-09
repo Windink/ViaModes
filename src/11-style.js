@@ -108,6 +108,36 @@ var VV_CSS = `
 .vv-player-video { all: initial; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; background: #000; }
 .vv-bright { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 140; }
 
+/* ---- 页内悬浮小窗：系统画中画不可用时的降级 ----
+   Via 这类 WebView 里 document.pictureInPictureEnabled 为 false，
+   requestPictureInPicture() 只会抛 NotSupportedError。与其点了没反应，
+   不如把播放器自己缩成一枚可拖动的 fixed 小窗：视频继续播，页面露出来还能点。 */
+.vv-player-root.mini { left: auto; top: auto; width: 46vw; max-width: 240px;
+  height: 25.9vw; max-height: 135px; border-radius: 12px; overflow: hidden;
+  border: 1px solid rgba(255,255,255,.22); box-shadow: 0 10px 30px rgba(0,0,0,.55); }
+/* 小窗里只留画面和一条操作条：全屏那套控制栏在 240px 宽下会挤成一团 */
+.vv-player-root.mini .vv-cs-top,
+.vv-player-root.mini .vv-cs-bottom,
+.vv-player-root.mini .vv-center-play,
+.vv-player-root.mini .vv-lockmark,
+.vv-player-root.mini .vv-seek-tip,
+.vv-player-root.mini .vv-ges-tip,
+.vv-player-root.mini .vv-loadbar,
+.vv-player-root.mini .vv-sheet,
+.vv-player-root.mini .vv-err,
+.vv-player-root.mini .vv-loading { display: none !important; }
+.vv-mini-bar { position: absolute; left: 0; top: 0; right: 0; height: 30px; z-index: 260;
+  display: none; align-items: center; justify-content: space-between; padding: 0 4px 0 9px;
+  background: linear-gradient(180deg, rgba(0,0,0,.78), rgba(0,0,0,0));
+  color: #fff; font: 11px system-ui, sans-serif; }
+.vv-player-root.mini .vv-mini-bar { display: flex; }
+.vv-mini-grip { opacity: .72; letter-spacing: .04em; pointer-events: none; }
+.vv-mini-acts { display: flex; align-items: center; }
+.vv-mini-btn { display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: none; border-radius: 8px; padding: 0;
+  background: rgba(255,255,255,.16); color: #fff; margin-left: 4px; }
+.vv-mini-btn:active { background: rgba(255,255,255,.32); }
+
 /* ---- 控制栏 ---- */
 .vv-cs-top { position: absolute; left: 0; top: 0; width: 100%; z-index: 200; display: flex; align-items: center; gap: 4px;
   padding: calc(env(safe-area-inset-top, 0px) + 6px) calc(env(safe-area-inset-right, 0px) + 8px) 34px calc(env(safe-area-inset-left, 0px) + 8px);
@@ -274,6 +304,43 @@ var VV_CSS = `
 .vv-sheet-item.on .vv-switch::after { transform: translateX(16px); }
 
 /* ============================================================
+   选集浮层
+   独立于播放器的 fixed 层：锁屏时、控制栏自动收起后也要能打开，
+   所以不塞进 .vv-sheet（那层归控制栏状态管）。
+   ============================================================ */
+.vv-ep-wrap { position: fixed; left: 0; top: 0; width: 100%; height: 100%; z-index: 2147483647;
+  background: rgba(8,9,13,.72); display: none; flex-direction: column; justify-content: flex-end;
+  font-family: system-ui, -apple-system, sans-serif; }
+.vv-ep-wrap.open { display: flex; }
+.vv-ep-wrap * { box-sizing: border-box; }
+.vv-ep { width: 100%; max-height: 76vh; display: flex; flex-direction: column;
+  background: var(--vv-glass-2); border-top: 1px solid var(--vv-line-2);
+  border-radius: var(--vv-r-lg) var(--vv-r-lg) 0 0; color: #e9eaee;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  box-shadow: 0 -20px 48px rgba(0,0,0,.5);
+  animation: vvSlideUp .22s var(--vv-ease); }
+.vv-ep-head { display: flex; align-items: center; padding: 16px 16px 8px 20px; }
+.vv-ep-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; color: #fff; letter-spacing: .01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vv-ep-btn { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 30px;
+  margin-left: 8px; padding: 4px 12px; border-radius: 15px; border: 1px solid var(--vv-line);
+  background: rgba(255,255,255,.08); color: var(--vv-t2); font: inherit; font-size: 12px; }
+.vv-ep-btn:active { background: rgba(255,255,255,.16); }
+.vv-ep-note { padding: 0 20px 12px; font-size: 11.5px; line-height: 1.5; color: var(--vv-t3); }
+.vv-ep-grid { overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 16px 6px; }
+.vv-ep-sec { padding: 12px 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--vv-t3); }
+.vv-ep-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(52px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.vv-ep-cell { display: flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 4px;
+  border: 1px solid var(--vv-line); border-radius: var(--vv-r-sm);
+  background: rgba(255,255,255,.06); color: var(--vv-t1); font-size: 13.5px; font-weight: 600;
+  font-variant-numeric: tabular-nums; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: background .16s var(--vv-ease), transform .12s var(--vv-ease); }
+.vv-ep-cell:active { background: rgba(255,255,255,.16); transform: scale(.94); }
+.vv-ep-cell.on { background: var(--vv-accent); border-color: transparent; color: #fff;
+  box-shadow: 0 4px 14px rgba(77,141,255,.34); }
+.vv-ep-foot { padding: 8px 20px 0; font-size: 11px; line-height: 1.5; color: var(--vv-t3); }
+
+/* ============================================================
    锁屏
    ============================================================ */
 .vv-lockmark { position: absolute; right: 12px; top: 14%; display: none; align-items: center; justify-content: center;
@@ -299,6 +366,8 @@ var VV_CSS = `
   .vv-center-play { width: 60px; height: 60px; }
   .vv-loading { padding: 16px 20px 14px; gap: 7px; }
   .vv-sheet { max-height: 80vh; }
+  .vv-ep { max-height: 84vh; }
+  .vv-ep-cell { min-height: 38px; }
   .vv-sheet-item { min-height: 44px; padding: 8px 16px; font-size: 13.5px; }
   .vv-seek-tip.scrub { bottom: calc(env(safe-area-inset-bottom, 0px) + 74px); }
 }
@@ -307,7 +376,7 @@ var VV_CSS = `
 }
 @media (prefers-reduced-motion: reduce) {
   /* 只关装饰动画；vv-lr-spin / vv-lb-slide 承载"还在动"的信息，不能停 */
-  .vv-sheet.open, .vv-panel, .vv-share { animation: none; }
+  .vv-sheet.open, .vv-panel, .vv-share, .vv-ep { animation: none; }
   .vv-csbtn, .vv-chip, .vv-sheet-item, .vv-prog-dot,
   .vv-prog-track, .vv-prog-buf, .vv-prog-cur, .vv-center-play { transition-duration: .001ms; }
 }

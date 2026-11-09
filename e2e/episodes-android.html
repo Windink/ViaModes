@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>选集 · Via 真机验证</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #eps { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 5px; margin-bottom: 14px; }
+  #eps a { display: block; padding: 7px 3px; text-align: center; font-size: 11px; text-decoration: none;
+      color: #245; background: #eef3ff; border: 1px solid #ccd8f5; border-radius: 7px; }
+  .noise a { display: inline-block; margin: 0 5px 5px 0; padding: 4px 7px; font-size: 10px;
+      color: #765; background: #fff4e6; border: 1px solid #ecd7b8; border-radius: 6px; }
+  video { width: 220px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>选集测试台（Via 真机）</h1>
+<p>24 集同模板链接 + 外域推荐 / 预告 / 年份 / 分页干扰链接。当前默认第 3 集。页面自动跑断言并上报，截图时会自动隐藏 HUD。</p>
+<div id="eps"></div>
+<div class="noise" id="noise"></div>
+<p>下面这条视频用来让嗅探先有一条结果：</p>
+<video controls preload="metadata" src="/e2e/flower.mp4"></video>
+
+<script>
+(function () {
+    // 24 集：href 的 query 必须与当前页完全一致，只改 hash。
+    // 本轮 URL 带 &expect=<版本>，若链接用固定 ?vvdebug=1，点集数时 query 一变，
+    // Via 的 WebView 会当成整页导航重新加载，测试会从头再跑一遍（且当前集变成 5）。
+    var q = location.search || '?vvdebug=1';
+    var box = document.getElementById('eps');
+    for (var i = 1; i <= 24; i++) {
+        var a = document.createElement('a');
+        a.href = q + '#ep=' + i;
+        a.textContent = '第' + i + '集';
+        box.appendChild(a);
+    }
+    var noise = document.getElementById('noise');
+    function add(text, href) {
+        var n = document.createElement('a');
+        n.href = href; n.textContent = text;
+        noise.appendChild(n);
+    }
+    add('第25集（外域推荐位）', 'https://other.example.com/play/25.html');
+    add('第99集 预告', q + '#ep=99');
+    add('2026年11月', q + '#ep=x');
+    add('1', '/e2e/page/1.html');
+    add('2', '/e2e/page/2.html');
+    add('3', '/e2e/page/3.html');
+})();
+</script>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var pass = 0, fail = 0;
+    var errs = [];
+    window.addEventListener('error', function (e) {
+        errs.push(String(e && (e.message || (e.error && e.error.message)) || 'unknown'));
+    }, true);
+
+    // Via 重启会恢复旧标签，旧测试页也会继续上报；带本轮唯一标识，驱动脚本只认这一轮
+    var RUN = (/episodes-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    function send(o) {
+        o.run = RUN;
+        o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function ok(name, cond, detail) {
+        if (cond) pass++; else fail++;
+        send({ tag: 'ok', name: name, pass: !!cond, detail: detail === undefined ? '' : String(detail) });
+        hud.textContent = (cond ? 'ok  ' : 'FAIL') + ' ' + name + '  [' + (detail === undefined ? '' : String(detail)) + ']  ' + pass + '/' + (pass + fail);
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function text(sel) { var e = document.querySelector(sel); return e ? e.textContent : ''; }
+
+    async function untilReady() {
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.epScan && window.__vv.epOpen) return true;
+            await wait(100);
+        }
+        return false;
+    }
+
+    async function main() {
+        var qStart = location.search;
+        var ready = await untilReady();
+        var vv = window.__vv;
+        var V = vv && vv.VV;
+        // ---- 环境 ----
+        send({ tag: 'env',
+            hasVV: !!vv,
+            version: V ? V.version : '',
+            build: V ? V.build : '',
+            ua: navigator.userAgent,
+            vw: window.innerWidth, vh: window.innerHeight, dpr: window.devicePixelRatio,
+            href: location.href
+        });
+        var em = /(?:&|\?)expect=([0-9.]+)/.exec(location.search || '');
+        var expect = em ? em[1] : '';
+        ok('脚本注入且调试句柄挂载', ready);
+        ok('Via 里是本次构建' + (expect ? ' v' + expect : ''),
+            !!(V && (!expect || V.version === expect)), V ? V.version + ' / ' + V.build : 'none');
+        ok('选集 API 齐全（扫描/打开/诊断/切集）',
+            !!(vv && vv.epScan && vv.epOpen && vv.epClose && vv.epGo && vv.epDiag));
+        if (!ready || !V) { send({ tag: 'done', pass: pass, fail: fail + 1, aborted: true }); return; }
+
+        // ---- 识别 ----
+        var d = vv.epScan(true);
+        var nums = d.page.map(function (p) { return p.num; });
+        var diag = vv.epDiag();
+        ok('剧集链接认出 24 集', d.page.length === 24, String(d.page.length));
+        ok('集号 1..24 连续', nums.join(',') === Array.from({ length: 24 }, function (_, i) { return i + 1; }).join(','), nums.join(','));
+        ok('外域/预告/年份/分页没混进最终列表', diag.linkCands > 24 && d.page.length === 24,
+            '候选 ' + diag.linkCands + ' / 最终 ' + d.page.length);
+        ok('当前集判定为第 3 集', d.current.page === 3, String(d.current.page));
+        ok('诊断报出模板分组与最终集数', diag.topGroups.length > 0 && diag.page === 24,
+            '组 ' + diag.topGroups.length + ' / 集 ' + diag.page);
+
+        // ---- 嗅探结果 ----
+        for (var w = 0; w < 30 && !(V.items && V.items.length); w++) await wait(150);
+        ok('嗅探到测试视频', !!(V.items && V.items.length), String(V.items ? V.items.length : 0));
+
+        // ---- 打开内置播放器，看顶栏一级入口 ----
+        vv.open({ url: location.origin + '/e2e/flower.mp4', name: '选集真机验证', type: 'MP4' });
+        await wait(900);
+        var acts = Array.from(document.querySelectorAll('.vv-top-acts .vv-csbtn'))
+            .map(function (b) { return b.getAttribute('data-act'); });
+        ok('顶栏五枚按钮且选集排第一', acts.join(',') === 'episodes,pip,fs,webfs,download', acts.join(','));
+        var epBtn = document.getElementById('vv-ep-btn');
+        ok('选集按钮有可读名称', !!epBtn && /选集/.test(epBtn.title || ''), epBtn ? epBtn.title : '');
+
+        // ---- 真实点击顶栏按钮打开浮层 ----
+        if (epBtn) epBtn.click();
+        await wait(450);
+        var wrap = document.getElementById('vv-ep-wrap');
+        var root = document.querySelector('.vv-player-root');
+        var cells = wrap ? wrap.querySelectorAll('.vv-ep-cell[data-kind="page"]') : [];
+        var on = wrap ? wrap.querySelector('.vv-ep-cell.on') : null;
+        var secs = wrap ? Array.from(wrap.querySelectorAll('.vv-ep-sec')).map(function (x) { return x.textContent; }) : [];
+        ok('点顶栏按钮能打开选集浮层', !!wrap && wrap.classList.contains('open'));
+        ok('浮层压在播放器之上', document.documentElement.lastElementChild === wrap);
+        ok('24 个集数格子', cells.length === 24, String(cells.length));
+        ok('当前集高亮第 3 集', !!on && on.getAttribute('data-num') === '3', on ? on.getAttribute('data-num') : '');
+        ok('标题含总集数', /24/.test(text('.vv-ep-title')), text('.vv-ep-title'));
+        ok('有「本页剧集」分组', secs.some(function (s) { return /本页剧集/.test(s); }), secs.join(' / '));
+        ok('挑集时控制栏不启动自动收起',
+            !!root && root.classList.contains('ep-open') && root._csTimer === 0,
+            'ep-open=' + (root ? root.classList.contains('ep-open') : false) + ' / timer=' + (root ? root._csTimer : -1));
+
+        // ---- 真机窄屏（Via 的 WebView 视口） ----
+        var boxEl = document.querySelector('.vv-ep');
+        var cellBox = document.querySelector('.vv-ep-cells');
+        var r = boxEl ? boxEl.getBoundingClientRect() : null;
+        var cols = cellBox ? getComputedStyle(cellBox).gridTemplateColumns.split(' ').length : 0;
+        ok('真机窄屏选集面板不溢出', !!r && r.right <= window.innerWidth + 1,
+            '右缘 ' + (r ? Math.round(r.right) : -1) + ' / ' + window.innerWidth);
+        ok('窄屏每行至少 4 集', cols >= 4, String(cols));
+        ok('真机视口确为窄屏（<420px）', window.innerWidth < 420, String(window.innerWidth));
+
+        // 视觉诊断：DOM 顺序在最顶不等于真的看得见，真机上要确认没被播放器层盖住
+        var cs = wrap ? getComputedStyle(wrap) : null;
+        var hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight * 0.8);
+        send({ tag: 'diag', phase: 'visual',
+            display: cs ? cs.display : '', visibility: cs ? cs.visibility : '',
+            opacity: cs ? cs.opacity : '', zIndex: cs ? cs.zIndex : '',
+            rect: r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : [],
+            hit: hit ? (hit.className || hit.tagName) : '',
+            hitInWrap: !!(wrap && hit && wrap.contains(hit)),
+            rootZ: getComputedStyle(root).zIndex
+        });
+
+        // ---- 留一个干净的截图窗口 ----
+        // WebView 在纯 setTimeout 等待期间不一定提交新帧（视频是独立 surface，会照常动），
+        // 系统 screencap 就可能拍到浮层出现之前的那一帧。这里持续轻微重绘强制合成。
+        hud.style.display = 'none';
+        var repaint = setInterval(function () {
+            if (wrap) wrap.style.opacity = (Date.now() % 2) ? '1' : '0.999';
+        }, 80);
+        send({ tag: 'hold', phase: 'panel' });
+        await wait(5500);
+        clearInterval(repaint);
+        if (wrap) wrap.style.opacity = '';
+        hud.style.display = '';
+
+        // ---- 关闭按钮 ----
+        var closeBtn = document.querySelector('.vv-ep-btn[aria-label="关闭"]');
+        send({ tag: 'diag', phase: 'close-before',
+            hasBtn: !!closeBtn,
+            btnCount: document.querySelectorAll('.vv-ep-btn').length,
+            wrapOpen: !!(document.getElementById('vv-ep-wrap') || {}).classList &&
+                document.getElementById('vv-ep-wrap').classList.contains('open'),
+            gmGet: typeof GM_getValue, gmSet: typeof GM_setValue,
+            lsKeys: Object.keys(localStorage).filter(function (k) { return k.indexOf('via.vp.') === 0; }).join(',')
+        });
+        if (closeBtn) closeBtn.click();
+        await wait(150);
+        var w2 = document.getElementById('vv-ep-wrap');
+        var w2Open = !!w2 && w2.classList.contains('open');
+        var w2Cells = w2 ? w2.querySelectorAll('.vv-ep-cell').length : -1;
+        ok('关闭后浮层收起且格子清空', !w2Open && w2Cells === 0,
+            'open=' + w2Open + ' / cells=' + w2Cells + ' / btn=' + !!closeBtn);
+        ok('关闭后播放器 ep-open 状态摘净', !!root && !root.classList.contains('ep-open'),
+            'ep-open=' + (root ? root.classList.contains('ep-open') : 'no-root'));
+
+        // ---- 点第 5 集：只换锚点的 SPA 选集 ----
+        vv.epOpen();
+        var c5 = document.querySelector('.vv-ep-cell[data-kind="page"][data-num="5"]');
+        if (c5) c5.click();
+        // Via 里 vvSet 优先写 GM_setValue（脚本私有存储），页面读 localStorage 永远看不到；
+        // __vv.get 是脚本侧只读句柄，用它读才验得到「跳页自动续播」这条链路
+        var stored = null, storeFrom = '';
+        if (vv && typeof vv.get === 'function') {
+            try { stored = vv.get('autoNextLast', null); storeFrom = '__vv.get'; } catch (e) {}
+        }
+        if (!stored) {
+            try { stored = JSON.parse(localStorage.getItem('via.vp.autoNextLast') || 'null'); storeFrom = 'localStorage'; } catch (e2) {}
+        }
+        if (typeof stored === 'string') { try { stored = JSON.parse(stored); } catch (e3) {} }
+        send({ tag: 'diag', phase: 'store', storeFrom: storeFrom, stored: JSON.stringify(stored),
+            lsKey: localStorage.getItem('via.vp.autoNextLast'), epAutoPlay: V.cfg.epAutoPlay });
+        var rootHidden = !root || root.style.display === 'none';
+        ok('点第 5 集切到该集地址', location.hash === '#ep=5', location.hash);
+        // query 变了就说明 Via 把「只换 hash」当成了整页导航，测试会被重载打断
+        ok('切集只改 hash、没有整页重载', location.search === qStart,
+            location.search + ' / 原 ' + qStart);
+        ok('写入「选集自动续播」标记', !!stored && stored.why === 'ep' && stored.num === 5, JSON.stringify(stored));
+        ok('跳页前关掉播放器', V.playerActive === false && rootHidden,
+            'active=' + V.playerActive + ' / rootHidden=' + rootHidden);
+        ok('跳页前选集浮层已收起', !V._epOpen && !!document.getElementById('vv-ep-wrap') &&
+            !document.getElementById('vv-ep-wrap').classList.contains('open'));
+
+        await wait(300);
+
+        // ---- 嗅探到的媒体直链：单独成组，点它不跳页直接换源 ----
+        V.items.length = 0; V.seen = {};
+        for (var k = 1; k <= 3; k++) {
+            V.items.push({ url: location.origin + '/e2e/ep' + k + '.mp4', type: 'MP4', name: 'ep' + k });
+        }
+        vv.epOpen();
+        var wrap3 = document.getElementById('vv-ep-wrap');
+        var secs3 = wrap3 ? Array.from(wrap3.querySelectorAll('.vv-ep-sec')).map(function (x) { return x.textContent; }) : [];
+        var mcells = wrap3 ? wrap3.querySelectorAll('.vv-ep-cell[data-kind="media"]') : [];
+        var hashBefore = location.hash;
+        var c2 = wrap3 ? wrap3.querySelector('.vv-ep-cell[data-kind="media"][data-num="2"]') : null;
+        if (c2) c2.click();
+        ok('嗅探直链单独成组', secs3.some(function (s) { return /嗅探到的视频/.test(s); }), secs3.join(' / '));
+        ok('直链组 3 集', mcells.length === 3, String(mcells.length));
+        ok('点直链不跳页', location.hash === hashBefore, hashBefore + ' → ' + location.hash);
+        ok('点直链直接换源', /\/e2e\/ep2\.mp4$/.test((V.active && V.active.item && V.active.item.url) || ''),
+            (V.active && V.active.item && V.active.item.url) || '');
+        ok('换源后标题带集数', /第 2 集/.test(text('#vv-title')), text('#vv-title'));
+
+        // ---- 收尾 ----
+        vv.epClose();
+        var wrap4 = document.getElementById('vv-ep-wrap');
+        ok('收尾后浮层与状态都干净', !!wrap4 && !wrap4.classList.contains('open') && !V._epOpen);
+        ok('全程无未捕获 JS 报错', errs.length === 0, errs.join(' | ').slice(0, 200));
+
+        send({ tag: 'done', pass: pass, fail: fail, errs: errs });
+        hud.textContent = 'DONE  ' + pass + ' passed / ' + fail + ' failed  ·  v' + V.version;
+    }
+
+    main().catch(function (e) {
+        send({ tag: 'fatal', msg: String(e && (e.stack || e.message || e)) });
+        send({ tag: 'done', pass: pass, fail: fail + 1, aborted: true });
+        hud.textContent = 'FATAL ' + String(e && (e.message || e));
+    });
+})();
+</script>
+</body>
+</html>

@@ -13,6 +13,9 @@ function vvMain() {
         if (/(?:\?|&)vvdebug=1(?:&|$)/.test(location.search || '')) {
             window.__vv = {
                 VV: VV,
+                // Via 里 vvSet 优先走 GM_setValue（脚本私有存储），页面 localStorage 读不到；
+                // 真机验证「跳页自动续播」这类跨页标记时只能从脚本这一侧读
+                get: vvGet,
                 hlsConfig: vvHlsConfig,
                 hlsSeekMode: vvHlsSetSeekMode,
                 diag: vvDiagText,
@@ -21,6 +24,13 @@ function vvMain() {
                 close: closePlayer,
                 openPanel: vvOpenPanel,
                 closePanel: function () { try { if (vvUI && vvUI.panel) vvUI.panel.close(); } catch (e) {} },
+                epScan: vvEpisodesScan,
+                epOpen: vvEpisodesOpen,
+                epClose: vvEpisodesClose,
+                epGo: vvEpGo,
+                epDiag: vvEpisodesDiag,
+                epNum: vvEpNum,
+                epTemplate: vvEpTemplate,
                 badge: vvToggleBadge,
                 // 网页铺满（原名页面全屏）：现场状态与手动开关
                 pageFs: vvPageFsState,
@@ -37,6 +47,10 @@ function vvMain() {
                 buildCmd: vvBuildCmd,
                 buildIntent: vvBuildIntent,
                 shareOpen: vvShareOpen,
+                shareClose: vvShareClose,
+                mini: vvMiniWindow,
+                pip: vvTryPip,
+                hasPriorityOverlay: vvHasPriorityOverlay,
                 leaseWrite: function (id, ts) {
                     try {
                         if (!ts) { localStorage.removeItem(VV_LEASE_PREFIX + id); return; }

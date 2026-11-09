@@ -239,7 +239,7 @@ try {
         window.__vv.close();
         return out;
     });
-    ok('顶栏四枚按钮且两枚全屏相邻', bar.acts.join(',') === 'pip,fs,webfs,download', bar.acts.join(','));
+    ok('顶栏五枚按钮、选集在最左且两枚全屏相邻', bar.acts.join(',') === 'episodes,pip,fs,webfs,download', bar.acts.join(','));
     ok('两枚按钮名称区分两种全屏',
         /沉浸全屏/.test(bar.fsLabel) && /隐藏状态栏/.test(bar.fsLabel) &&
         /网页铺满/.test(bar.wfLabel) && !/状态栏/.test(bar.wfLabel),

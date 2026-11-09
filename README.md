@@ -18,6 +18,16 @@
 - `blob:` 永远排最后：它只是页面自己 MSE 会话的句柄，脱离原上下文单独播放必然是 `readyState=0` 的白屏，不能占第一位
 - 点开角标 → 底部列表：▶ 内置播放器播放 / ⭳ 下载 / ⧉ 导出给外部播放器
 
+### 选集（剧集列表）
+- 入口：播放器顶栏胶囊最左的「选集」按钮、播放器「更多 → 选集」、嗅探面板头部「选集」；脚本菜单里另有「选集（打开剧集列表）」与「选集 诊断」
+- 两类来源分开摆，点下去会发生什么一眼可见：
+  - **本页剧集**：扫描 `a[href]`（以及带 `data-href / data-url / data-num` 的元素）里带「第 N 集 / EP N / 纯数字」文本的链接，按 **URL 数字模板**分组，只取成员最多、集号互不重复的那一组。当前页所在模板额外加权，避免把分页导航「1 2 3」或侧栏相关推荐当成选集；外域链接与「预告 / 花絮 / 下载」等文本一律排除
+  - **嗅探到的视频**：已抓到的多条媒体直链若呈同模板不同数字，本身就是一套分集，点格子**不跳页、直接换源**（最快）
+- 点「本页剧集」会跳到该集页面，并在新页面自动接着播（复用连播的 `autoNextLast` 通道）；不想自动播可在脚本菜单关掉「选集跳页后自动播放」
+- 站点用 JS 原地切集、没有可跳转地址时，选集只替你点一下那个元素，1.5 秒后重新嗅探：页面吐出新地址就直接换源，没吐出则提示点「刷新」再扫
+- 当前集高亮蓝色；网格最多 200 集，360px 窄屏自动换行不溢出；挑集期间控制栏不会自动收起
+- **限制**：剧集文本不是数字（「上」「下」「大结局」）、列表画在 canvas 里、或站点切集后完全不重新发媒体请求时认不出来。列表没出来先点菜单「选集 诊断」——它会报出 `a[href]` 总数、像集数的链接数、URL 模板分组与最终集数
+
 ### 抗页面广告遮挡
 - 角标、嗅探面板、播放器、toast、续播提示统一使用 CSS 最高层级 `2147483647`，并直接挂在 `<html>` 下
 - 显示时优先用 `moveBefore` 原子移到 `<html>` 末尾（旧 WebView 回退 `appendChild`），同层级广告也压不过
@@ -122,7 +132,7 @@
 - 全屏自制 HTML5 播放器，不依赖 Via 自带的播放组件；手势、倍速、画质等交互全部自实现，目标是接近主流手机浏览器「点开即全屏、手势控进度」的沉浸播放体验
 - **界面**（重做过一轮，目标是"看起来像现在的播放器"而不是 2015 年的 demo）：
   - 图标统一成一套 `24×24 / 描边 1.8 / currentColor` 的 SVG（`vvIcon()`）。此前 `🔒` 是黄色 emoji、`⏸ ⧉ ⋯ ⭳` 是文字字形、PiP 与全屏又各是一枚内联 SVG，四套视觉语言混在同一条控制栏里
-  - 顶栏 `[返回] 标题 …… [画中画｜沉浸全屏｜网页铺满｜下载]`，右侧四件收进一枚玻璃胶囊；顶部遮罩从 ~60px 加到 ~96px，标题不再悬在画面上
+  - 顶栏 `[返回] 标题 …… [选集｜画中画｜沉浸全屏｜网页铺满｜下载]`，右侧五件收进一枚玻璃胶囊；顶部遮罩从 ~60px 加到 ~96px，标题不再悬在画面上
   - **两枚全屏按钮并列**：`沉浸全屏` 走 `ROOT.requestFullscreen()`（系统沉浸，可能隐藏状态栏）；`网页铺满` 只把站点播放器放大到可视区、不碰浏览器栏，开着时按钮点亮成蓝色并带 `aria-pressed="true"`。点其中一枚会静默关掉另一枚，不会把两套全屏叠在一起
   - 底栏两行：进度行（当前时间 · 轨道 · 总长）＋ 动作行 `[播放][下一集] …… [清晰度][倍速][锁][更多]`
   - **清晰度**从「更多 → 画质」两级深处提为常驻胶囊，只在多码率 HLS 时出现；**倍速**胶囊只显示倍速本身（原来挤着「1.5x · 自动·200P」三段信息）
@@ -155,7 +165,8 @@
 - **片头/片尾标记**：手动标记一次，之后自动跳过
 - **连播**：自动识别 URL 数字规律（`cand.m3u8` → `cand2.m3u8`）/ 同页下一集链接，播完自动继续
 - m3u8 自动加载 hls.js（已内联，失败时自动按 fastly/jsdelivr/unpkg 顺序降级）
-- 画中画小窗（WebView 支持时可用）与全屏（横竖屏）
+- **画中画 / 页内悬浮小窗**：系统画中画可用时走 `requestPictureInPicture()`，退出小窗时把播放器层还原（原先只藏不还原，返回是一片黑）；Via 这类 WebView 不提供系统画中画（实测 `pictureInPictureEnabled=false`、调用抛 `NotSupportedError`），按钮会自动降级成页内悬浮小窗——按视口 46%（封顶 240px）缩成 16:9 的可拖动浮窗，带「还原全屏 / 关闭」，轻点小窗也能还原；小窗里全屏控制栏与亮度/音量/seek 手势让位给拖动手势，页面解除冻结可以继续刷。更多菜单里也有「页内小窗（悬浮播放）」入口
+- 全屏（横竖屏）
 - 从播放器直接 ⭳ 交给 Via 下载（带 Referer，规避部分防盗链）
 
 ### 脚本菜单（Via 菜单 → 脚本）
@@ -551,6 +562,71 @@ Android 15 / x86_64 / 系统 WebView 110、Via 7.3.3。
 > `vv-pagefs-inner-anc` 留在了 class 里（外层没有该规则，视觉无影响但确实是脏的）。
 > 已修，并在 `pagefs-probe.mjs` 里补了「退出后祖先 class 零残留」断言。
 
+### 选集真机验证（MuMu + Via）
+
+桌面 Chromium 的 `episodes-verify.mjs` 已经把识别、渲染、切集跑通，但有三件事只有真实 Via 能验：
+**360×520 的 WebView 视口**、**Via 的 GM 私有存储**、以及 `location.href` 只改 hash 时 Via 会不会当成整页导航。
+
+测试台：
+
+- `e2e/episodes-android.html`：页内 24 集同模板链接 + 外域推荐 / 预告 / 年份 / 分页干扰链接，
+  自己执行断言并把结果 POST 到 `/__report`；每轮带唯一 `runId`，驱动脚本只统计本轮。
+- `scripts/mumu-episodes.mjs`：连 adb → `reverse tcp:8099` → 重启 Via 打开测试页 → 抓截图 → 读上报汇总。
+  前置：MuMu 已启动、Via 里脚本已更新到当前版本（设置 → 脚本 → 更新）。
+  运行 `node scripts/mumu-episodes.mjs`（服务没起会自动起；`ADB` / `SERIAL` / `PORT` 可覆盖）。
+
+结果（Via 7.3.3 / Android 15 / WebView 110，WebView 视口 **360×520**、dpr 3，脚本 v0.1.56）：**35 项全过**。
+
+| 分组 | 结果 |
+| --- | --- |
+| 版本与入口 | 装的是 v0.1.56；顶栏五枚按钮 `episodes,pip,fs,webfs,download`，选集排第一；点它浮层打开且压在播放器之上 |
+| 识别 | 24 集、集号 1..24 连续；27 条候选里外域 / 预告 / 年份 / 分页全被排除；当前集 = 3；模板分组 2 组 |
+| 渲染与窄屏 | 24 格、第 3 集高亮、标题「选集 · 24 集」、有「本页剧集」分组；`ep-open=true / csTimer=0`（挑集时控制栏不自动收起）；面板右缘 360 = 视口宽，每行 5 格 |
+| 交互 | 关闭按钮收起浮层且格子清零；点第 5 集 → `#ep=5`、query 不变（没整页重载）、`autoNextLast={why:'ep',num:5}`、播放器关闭、浮层收起 |
+| 直链换源 | 嗅探直链单独成组 3 集，点第 2 集不跳页、直接换源、标题带「第 2 集」 |
+| 收尾 | 浮层与状态都干净，全程无未捕获 JS 报错 |
+
+真机上才暴露的两个坑：
+
+1. **GM 私有存储页面读不到**：Via 里 `vvSet` 优先走 `GM_setValue`，页面 `localStorage` 里根本没有
+   `via.vp.autoNextLast`，桌面验证那套读法在真机会误报「没写续播标记」。为此在 `?vvdebug=1` 下补了
+   只读 `__vv.get`，从脚本侧读，实测拿到 `{why:'ep',num:5}`。
+2. **query 一变就整页重载**：测试页原本把剧集链接写成固定 `?vvdebug=1#ep=N`，而真机 URL 多了
+   `&expect=<版本>`，点第 5 集时 `location.href` 的 query 也跟着变，Via 的 WebView 当成整页导航
+   重新加载，测试会跑第二遍且当前集变成 5。现在链接的 query 跟随当前页、只改 hash，
+   并补了「切集只改 hash、没有整页重载」断言防回归。
+
+> 截图说明：`adb screencap` 抓的是 SurfaceFlinger 合成帧，这轮里始终只有播放器、没有浮层；
+> 但页面内 `elementFromPoint` 命中浮层格子，计算样式为 `display:flex / z-index:2147483647`，
+> 且 35 项布局断言全过。所以结论以页内 DOM 断言为准，系统截图只在 `.tmp/episodes-android.png` 留档，
+> 不作为交付证据。
+
+### 小窗 / 导出浮层真机验证（MuMu + Via）
+
+桌面 Chromium 里系统画中画是可用的，测不出 Via WebView 110 的 `NotSupportedError`；
+嗅探面板与播放器每 2.5 秒一次的置顶巡检，也只有真实点击链路能复现「浮层被盖住」。
+
+- `e2e/pip-share-android.html`：页内自驱动断言，POST 到 `/__report`；每轮带唯一 `runId`。
+- `scripts/mumu-pip-share.mjs`：连 adb → `reverse tcp:8099` → 重启 Via 打开测试页 → 读上报汇总。
+  前置：MuMu 已启动、Via 里脚本已更新到当前版本；运行 `node scripts/mumu-pip-share.mjs`。
+
+结果（Via 7.3.3 / Android 15 / WebView 110，视口 360×520，脚本 v0.1.59）：**40 项全过**。
+
+| 分组 | 结果 |
+| --- | --- |
+| 小窗 | `pictureInPictureEnabled=false` → 点顶栏画中画自动降级；小窗 168×95、完整落在视口内、全屏控制栏隐藏、操作条两枚按钮、页面解除冻结、视频没被拆掉；拖动后 left 182→112；点还原铺满 360×520 且内联尺寸清空 |
+| 入口 | 更多菜单「页内小窗（悬浮播放）」能进也能出 |
+| 导出浮层 | 从嗅探面板点导出后面板收起、按钮立刻可点；跨过 2.5 秒巡检仍可点且没被面板/播放器挪到身后；只复制链接、复制 curl、导出 .m3u 后浮层都不关；关闭后巡检恢复 |
+
+修的是同一类问题的两条路径：`vvKeepPanelTop` 与 `vvKeepPlayerTop` 都会把自己重新 append 到
+`<html>` 末尾，而分享/选集浮层和它们同为 `z-index:2147483647`，2.5 秒后就被整块盖住
+（实测 `elementFromPoint` 从命中 `vv-share-btn` 变成命中 `vv-panel-wrap` / `vv-player-video`）。
+现在两者遇到分享/选集浮层或页内小窗一律让位，打开分享浮层时还会先收起嗅探面板；
+点「导出 .m3u」触发 Via 系统下载界面、页面恢复可见时也把浮层重新置顶。
+
+> 点「导出 .m3u」会拉起 Via 的系统下载界面，页面短暂进入后台，期间未完成的 `fetch` 上报可能被取消；
+> 测试台把这两条断言延后到 1.6 秒再发，避免把丢包当成失败。
+
 ### 真实站点实测（真实点播页）
 
 
@@ -618,43 +694,53 @@ src/
   00-core.js     共享核心（状态、存储、媒体识别、HLS 主/子清单与分片过滤、push/扫描、toast）
   10-sniffer.js  XHR/fetch 钩子 + MutationObserver + DOM 扫描 + 资源计时（PerformanceObserver）
   11-style.js    全部 CSS（模板字符串）
-  20-ui.js       悬浮角标 + 嗅探列表面板 + 下载/复制
-  30-player.js   播放器骨架（DOM、控制栏、加载 hls、生命週期）
+  20-ui.js       悬浮角标 + 嗅探列表面板 + 下载/复制 + 置顶巡检避让
+  30-player.js   播放器骨架（DOM、控制栏、加载 hls、生命週期、页内悬浮小窗与系统画中画降级）
   31-player-x.js 手势、进度拖动、倍速/画质/菜单 sheet、连播检测
-  32-share.js    外部播放器导出（.m3u / curl）与链接兼容性自检
+  32-share.js    外部播放器导出（.m3u / curl）、链接兼容性自检、分享浮层的置顶保活
   33-multiplayer.js 跨页面播放登记表、并行资源预算、标签页休眠（回收后台解码器）、实例重建/强制关闭
   40-menu.js     脚本菜单命令、连播页面跳转消费
   45-pagefs.js   网页铺满（原名页面全屏）：状态机、目标选取（video/shadow/iframe/canvas）、CSS 与 shadow/iframe 内注入、退出还原、巡检
+  46-episodes.js 选集：集数文本识别 / URL 模板分组 / 页面链接与嗅探直链两类来源 / 网格浮层 / 跳页续播与原地切集
   50-boot.js     启动流程（DOM ready 后初始化）
 vendor/hls.light.min.js   构建时内联（网络不可达时自动降级为 CDN 懒加载）
 build.mjs        合并 → dist/via-video-player.user.js → node --check
 CHANGELOG.md     逐版本变更记录（「未发布」段由 build.mjs 自动定版）
-scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动 271 项断言）
+scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动/选集识别与分组/页内小窗状态机/系统画中画降级/置顶巡检避让 311 项断言）
 scripts/serve.mjs  E2E 静态服务器（含 mp4/m3u8 MIME 与 Range；`?noRange=1` 模拟不可跳转；`/guard/*` 强制 Referer）
 scripts/e2e-verify.mjs  无头 Chrome 真实链路验证（起服务器→嗅探→播放→seek→切档→诊断→外链自检，48 项）
 scripts/ui-verify.mjs  UI/交互层功能矩阵（真实 Touch/Mouse 事件：手势/倍速/画质/锁屏/菜单交互/进度记忆/加载进度/失败卡片，98 项）
 scripts/audio-check.mjs  声音专项回归（起播有声 / 后台交还再回来 / 关掉重开 / 历史 vol=0 自救 / 主动静音不被抢 / 站点播放器拆装 / **真实标签切换**，22 项）
 scripts/pagefs-verify.mjs  网页铺满真实浏览器验证（fixed 铺满视口 / 祖先 transform 清理 / 退出零残留 / 不锁页面滚动 / 不调用 requestFullscreen / 两枚全屏按钮互斥 / 360px 窄屏不溢出，41 项）
 scripts/pagefs-probe.mjs   网页铺满多布局探针（干净页 / transform / 层叠上下文 / contain:paint / shadow DOM / body transform / 站点 fixed 播放器 / canvas 解码 / 同源 iframe / 跨域 iframe，27 项）
-scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图）
+scripts/episodes-verify.mjs  选集真实浏览器验证（真实 DOM 剧集识别 / 干扰排除 / 网格渲染 / 当前集高亮 / 360px 窄屏 / 跳页续播标记 / 直链换源，29 项）
+scripts/mumu-episodes.mjs  选集真机验证驱动（MuMu + Via：adb 连接 / 端口映射 / 拉起页面 / 抓图 / 汇总页内上报，35 项）
+scripts/mumu-pip-share.mjs  小窗 / 导出浮层真机验证驱动（MuMu + Via：页内小窗降级、拖动与还原、跨 2.5 秒置顶巡检浮层仍可点，40 项）
+scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图→选集验证）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/real-site-test.mjs  注入真实站点（默认某视频站点播页）验证嗅探/播放/加载进度/seek/倍速/画质/续播
 scripts/site-matrix.mjs  多站点分发策略矩阵，逐站出「嗅探→起播→进度UI」结论
 scripts/bench.mjs  性能基准（本地 mp4 对照 + 公网 HLS），落两张截图
 scripts/share-shot.mjs  截图「外部播放器」浮层与自检结果
 scripts/load-shot.mjs  截图「加载进度」确定态与不确定态
+e2e/episodes.html  选集测试台：24 集同模板链接 + 外域推荐位 / 预告 / 年份 / 分页导航干扰，用 `#ep=N` 锚点让点集不重载页面
+e2e/episodes-android.html  选集真机自驱动测试台：同一套素材，页内跑 35 项断言并 POST 上报（链接 query 跟随当前页，只改 hash）
+e2e/pip-share-android.html  小窗 / 导出浮层真机自驱动测试台：页内跑 40 项断言并 POST 上报（含 TouchEvent 拖动模拟与跨巡检窗口）
 e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产物写在 e2e/local/，不入库）
 ```
 
 ```
 node build.mjs            # 构建并语法校验
-node scripts/smoke.mjs    # 烟雾测试（271 项）
+node scripts/smoke.mjs    # 烟雾测试（311 项）
 node scripts/e2e-verify.mjs   # 无头 Chrome 真机链路验证（需 puppeteer-core）
 node scripts/ui-verify.mjs    # UI 交互功能矩阵（98 项）
 node scripts/audio-check.mjs  # 声音专项回归（含真实标签切换，22 项）
 node scripts/pagefs-verify.mjs # 网页铺满真实浏览器验证（41 项）
 node scripts/pagefs-probe.mjs  # 网页铺满多布局探针（27 项）
-node scripts/test-all.mjs     # 一键跑全套（9 阶段）
+node scripts/episodes-verify.mjs # 选集真实浏览器验证（29 项）
+node scripts/mumu-episodes.mjs # 选集真机验证（需先启动 MuMu 并在 Via 里更新脚本，35 项）
+node scripts/mumu-pip-share.mjs # 小窗 / 导出浮层真机验证（同上，40 项）
+node scripts/test-all.mjs     # 一键跑全套（10 阶段）
 node scripts/real-site-test.mjs  # 真实站点实测（需外网）
 node scripts/serve.mjs    # 另开终端，然后浏览器打开 http://localhost:8099/e2e/
 ```

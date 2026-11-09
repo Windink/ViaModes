@@ -1,5 +1,18 @@
 var vvUI = { badge: null, panel: null };
 
+// 分享 / 选集浮层与页内小窗都和面板同级（z-index 都是 2147483647），
+// 谁在 DOM 末尾谁就盖住谁。面板的定时置顶巡检不能在有这些层时抢顶，
+// 否则从面板点「导出」打开的浮层会在 2 秒后被整块盖住，看着像界面自己关了。
+function vvHasPriorityOverlay() {
+    try {
+        if (document.getElementById('vv-share-wrap')) return true;
+        var ep = document.getElementById('vv-ep-wrap');
+        if (ep && ep.classList.contains('open')) return true;
+        if (VV._mini) return true;
+    } catch (e) {}
+    return false;
+}
+
 function vvAddCss(css) {
     try {
         if (typeof GM_addStyle === 'function') { GM_addStyle(css); return; }
@@ -96,6 +109,7 @@ function vvKeepBadgeTop(b) {
                 return;
             }
             // 页面可能在播放中不断插入广告浮层，被盖住时才把角标重新压到最上层
+            if (vvHasPriorityOverlay()) return;
             if (!b._touching && vvIsOccluded(b)) vvBringToFront(b);
         } catch (e) {
             clearInterval(VV._badgeTopTimer);
@@ -119,6 +133,7 @@ function vvKeepPanelTop(w) {
                 VV._panelTopTimer = null;
                 return;
             }
+            if (vvHasPriorityOverlay()) return;
             if (!w._touching && vvIsOccluded(w)) vvBringToFront(w);
         } catch (e) {
             clearInterval(VV._panelTopTimer);
@@ -134,7 +149,8 @@ function vvStopPanelTop() {
 }
 
 function vvShowBadgeNew() {
-    if (VV.items.length === 0 || VV.playerActive || VV._panelOpen) return;
+    // 分享 / 选集浮层开着时别把角标放出来：它同样挂在 <html> 末尾且 z-index 同级
+    if (VV.items.length === 0 || VV.playerActive || VV._panelOpen || vvHasPriorityOverlay()) return;
     try {
         var b = vvBadge();
         var num = b.querySelector('.vv-badge-num');
@@ -149,6 +165,7 @@ function vvToggleBadge(show) {
     try {
         var b = vvBadge();
         if (show) {
+            if (vvHasPriorityOverlay()) return;
             vvBringToFront(b);
             b.classList.add('show');
             vvKeepBadgeTop(b);
@@ -174,6 +191,7 @@ function vvEnsurePanel() {
     var panel = vvEl('div', 'vv-panel');
     var head = vvEl('div', 'vv-head');
     var title = vvEl('div', 'vv-head-title', '视频嗅探');
+    var btnEp = vvEl('button', 'vv-head-btn', '选集');
     var btnScan = vvEl('button', 'vv-head-btn', '刷新');
     var btnClear = vvEl('button', 'vv-head-btn', '清空');
     var btnClose = vvEl('button', 'vv-head-btn');
@@ -181,6 +199,7 @@ function vvEnsurePanel() {
     btnClose.setAttribute('aria-label', '关闭');
     btnClose.title = '关闭';
     head.appendChild(title);
+    head.appendChild(btnEp);
     head.appendChild(btnScan);
     head.appendChild(btnClear);
     head.appendChild(btnClose);
@@ -229,6 +248,7 @@ function vvEnsurePanel() {
             vvToast('已清空');
         }
     };
+    btnEp.addEventListener('click', function () { vvEpisodesOpen(); });
     btnScan.addEventListener('click', api.refresh);
     btnClear.addEventListener('click', api.clear);
     btnClose.addEventListener('click', api.close);

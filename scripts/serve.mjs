@@ -59,6 +59,10 @@ http.createServer(async (req, res) => {
     // 测试页同理：Via 的 WebView 缓存是"按 URL 路径"的，带 ?t= 或 Cache-Control 都拦不住，
     // 改了页面照样跑旧的（诊断字段都对不上，白测一轮）。用带版本号的路径别名强制换 key。
     if (/^\/e2e\/mumu-tab-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/mumu-tab.html';
+    // 选集真机测试台同理：每轮换一个别名路径，避开 Via 按 URL 路径命中的缓存
+    if (/^\/e2e\/episodes-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/episodes-android.html';
+    // 小窗 / 导出浮层真机测试台同理
+    if (/^\/e2e\/pip-share-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/pip-share-android.html';
     if (/^\/e2e\/vendor\/hls-[A-Za-z0-9._-]+\.js$/.test(pathname)) pathname = '/e2e/vendor/hls.min.js';
     // 防盗链测试端点：没有 Referer 一律 403，用来验证"外链自检"能识别出防盗链
     if (pathname === '/guard/stream.m3u8') {

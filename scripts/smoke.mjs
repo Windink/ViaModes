@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -1090,6 +1090,137 @@ withQsa({ video: [smallVideo], iframe: [bigIframe] }, () => {
     eq('诊断：报告最终目标类型', d.kind, 'iframe');
 });
 eq('诊断文案可读', typeof T.pageFsDiagnose(), 'string');
+
+// ===== 选集：集数识别、URL 模板分组、干扰排除、当前集判定 =====
+eq('选集：中文集数', T.epNum('第12集'), 12);
+eq('选集：EP 写法', T.epNum('EP05'), 5);
+eq('选集：纯数字短文本', T.epNum(' 3 '), 3);
+eq('选集：第 0 集不是「没集数」', T.epNum('第0集'), 0);
+eq('选集：预告不算一集', T.epNum('第1集 预告'), null);
+eq('选集：年份文本不算集数', T.epNum('2026年11月'), null);
+eq('选集：下载链接不算集数', T.epNum('下载 1080P'), null);
+eq('选集：token 不影响 URL 模板',
+    T.epTemplate('https://a.com/play/1.html?t=111'), T.epTemplate('https://a.com/play/2.html?t=222'));
+eq('选集：不同 path 是不同剧',
+    T.epTemplate('https://a.com/play/1.html') !== T.epTemplate('https://a.com/detail/1.html'), true);
+
+const qsaEpOrig = documentStub.querySelectorAll;
+function withEpDom(links, els, fn) {
+    documentStub.querySelectorAll = (sel) => (sel === 'a[href]' ? links : (els || []));
+    try { return fn(); } finally { documentStub.querySelectorAll = qsaEpOrig; }
+}
+function epA(text, href) {
+    return {
+        tagName: 'A', textContent: text, parentNode: null,
+        getAttribute(k) { return k === 'href' ? href : null; },
+        setAttribute() {}, addEventListener() {}
+    };
+}
+const epLinks = [];
+for (let i = 1; i <= 12; i++) epLinks.push(epA('第' + i + '集', 'https://example.com/play/' + i + '.html'));
+epLinks.push(epA('第13集', 'https://other.com/play/13.html'));          // 外域推荐位
+epLinks.push(epA('第14集 预告', 'https://example.com/play/14.html'));     // 预告
+epLinks.push(epA('2026年11月', 'https://example.com/play/15.html'));      // 没有集数
+
+winStub.location.href = 'https://example.com/play/3.html';
+const epScan1 = withEpDom(epLinks, [], () => T.epScan(true));
+eq('选集：认出 12 集', epScan1.page.length, 12);
+eq('选集：集号按数字排序', epScan1.page.map((p) => p.num), [1,2,3,4,5,6,7,8,9,10,11,12]);
+eq('选集：外域与预告不混进列表',
+    epScan1.page.some((p) => p.num === 13) || epScan1.page.some((p) => p.num === 14), false);
+eq('选集：当前页就是当前集', epScan1.current.page, 3);
+
+// 影视页最常见的误判：分页导航「1 2 3 …」比只有 3 集的剧集格子多。
+// 当前页所在模板必须加权，否则选集点开是一堆页码。
+const epMix = [];
+for (let i = 1; i <= 3; i++) epMix.push(epA('第' + i + '集', 'https://example.com/play/' + i + '.html'));
+for (let i = 1; i <= 10; i++) epMix.push(epA(String(i), 'https://example.com/page/' + i + '.html'));
+winStub.location.href = 'https://example.com/play/2.html';
+const epScan2 = withEpDom(epMix, [], () => T.epScan(true));
+eq('选集：当前页模板压过分页导航', epScan2.page.map((p) => p.num), [1, 2, 3]);
+eq('选集：分页导航一格没混进来', epScan2.page.length, 3);
+
+// 已嗅探到的同模板直链本身就是分集，点它不跳页
+T.VV.items.length = 0;
+T.VV.seen = {};
+for (let i = 1; i <= 3; i++) T.VV.items.push({ url: 'https://cdn.example.com/v/ep' + i + '.mp4', type: 'MP4', name: 'ep' + i });
+const epScan3 = withEpDom([], [], () => T.epScan(true));
+eq('选集：同模板直链成组', epScan3.media.length, 3);
+eq('选集：直链集号来自 URL', epScan3.media.map((p) => p.num), [1, 2, 3]);
+
+const epDiag = withEpDom(epLinks, [], () => T.epDiag());
+eq('选集：诊断报出链接总数', epDiag.aLinks, 15);
+eq('选集：诊断报出像集数的链接', epDiag.linkCands, 12);
+eq('选集：诊断给出最终集数', epDiag.page, 12);
+eq('选集：诊断报出模板分组', epDiag.topGroups.length > 0, true);
+
+// ===== 页内小窗（系统画中画不可用时的降级）与面板抢顶避让 =====
+function miniRootStub() {
+    const cls = new Set();
+    return {
+        style: {}, _csTimer: 0, parentNode: {}, offsetWidth: 240, offsetHeight: 135,
+        classList: {
+            add(...xs) { xs.forEach((x) => cls.add(x)); },
+            remove(...xs) { xs.forEach((x) => cls.delete(x)); },
+            contains(x) { return cls.has(x); },
+            toggle() {}
+        },
+        _cls: cls,
+        appendChild() {}, removeChild() {}, addEventListener() {}, setAttribute() {},
+        querySelector() { return null; }, querySelectorAll() { return []; },
+        getBoundingClientRect() { return { left: 0, top: 0, width: 240, height: 135 }; }
+    };
+}
+T.setPlayerActive(true);
+const mr = miniRootStub();
+T.setRoot(mr);
+T.setMini(false);
+eq('小窗：初始不在小窗状态', T.VV._mini, false);
+eq('小窗：进入返回 true', T.mini(true, 'direct'), true);
+eq('小窗：VV._mini 置位', T.VV._mini, true);
+eq('小窗：mini 类已加', mr._cls.has('mini'), true);
+// 前面的网页铺满用例把视口改成了 412px，期望值跟着实际视口算，别写死
+const miniW = Math.max(150, Math.min(240, Math.round(winStub.innerWidth * 0.46)));
+eq('小窗：宽度按视口 46%', mr.style.width, miniW + 'px');
+eq('小窗：高度按 16:9', mr.style.height, Math.round(miniW * 9 / 16) + 'px');
+eq('小窗：默认贴右下角', mr.style.left, Math.max(8, winStub.innerWidth - miniW - 12) + 'px');
+eq('小窗：页面解除冻结', documentStub.documentElement.style.overflow, '');
+eq('小窗：重复进入是幂等的', T.mini(true, 'direct'), true);
+T.mini(false);
+eq('小窗：退出后 VV._mini 复位', T.VV._mini, false);
+eq('小窗：退出后 mini 类摘掉', mr._cls.has('mini'), false);
+eq('小窗：退出后内联尺寸清空', [mr.style.width, mr.style.height, mr.style.left, mr.style.top].join('|'), '|||');
+eq('小窗：退出后页面重新冻结', documentStub.documentElement.style.overflow, 'hidden');
+
+// Via 的 WebView：pictureInPictureEnabled=false，不该再去调 requestPictureInPicture
+documentStub.pictureInPictureEnabled = false;
+T.setVid({ requestPictureInPicture: function () { throw new Error('不该调用'); } });
+T.pip();
+eq('小窗：WebView 不支持系统画中画时直接降级', T.VV._mini, true);
+T.mini(false);
+// 函数存在但 promise 被拒（真机上就是 NotSupportedError）时也要降级
+documentStub.pictureInPictureEnabled = true;
+T.setVid({
+    requestPictureInPicture: () => Promise.reject(Object.assign(new Error('not available'), { name: 'NotSupportedError' }))
+});
+T.pip();
+await new Promise((r) => setTimeout(r, 0));
+eq('小窗：系统画中画被拒时降级', T.VV._mini, true);
+T.mini(false);
+documentStub.pictureInPictureEnabled = false;
+
+const geOrig = documentStub.getElementById;
+documentStub.getElementById = () => null;
+eq('面板避让：没有更高优先级浮层时不拦', T.hasPriorityOverlay(), false);
+documentStub.getElementById = (id) => (id === 'vv-share-wrap' ? { className: 'vv-share-wrap' } : null);
+eq('面板避让：分享浮层在时停手', T.hasPriorityOverlay(), true);
+documentStub.getElementById = (id) => (id === 'vv-ep-wrap'
+    ? { classList: { contains: (c) => c === 'open' } } : null);
+eq('面板避让：选集浮层打开时停手', T.hasPriorityOverlay(), true);
+documentStub.getElementById = geOrig;
+T.setMini(true);
+eq('面板避让：页内小窗时停手', T.hasPriorityOverlay(), true);
+T.setMini(false);
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

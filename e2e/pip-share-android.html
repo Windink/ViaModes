@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>小窗 / 导出浮层 · Via 真机验证</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  video { width: 200px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>小窗 / 导出浮层测试台（Via 真机）</h1>
+<p>验证系统画中画不可用时能降级成页内悬浮小窗，以及从嗅探面板点「导出」后浮层跨过 2.5 秒置顶巡检仍可点。页面自动跑断言并上报。</p>
+<video preload="metadata" src="/e2e/flower.mp4"></video>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var pass = 0, fail = 0, errs = [];
+    window.addEventListener('error', function (e) {
+        errs.push(String(e && (e.message || (e.error && e.error.message)) || 'unknown'));
+    }, true);
+
+    // Via 重启会恢复旧标签，旧测试页也会继续上报；带本轮唯一标识，驱动脚本只认这一轮
+    var RUN = (/pip-share-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    function send(o) {
+        o.run = RUN;
+        o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function ok(name, cond, detail) {
+        if (cond) pass++; else fail++;
+        send({ tag: 'ok', name: name, pass: !!cond, detail: detail === undefined ? '' : String(detail) });
+        hud.textContent = (cond ? 'ok  ' : 'FAIL') + ' ' + name + '  [' +
+            (detail === undefined ? '' : String(detail)) + ']  ' + pass + '/' + (pass + fail);
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function txt(sel) { var e = document.querySelector(sel); return e ? (e.textContent || '').trim() : ''; }
+    function byText(sel, s) {
+        var all = document.querySelectorAll(sel);
+        for (var i = 0; i < all.length; i++) if ((all[i].textContent || '').indexOf(s) >= 0) return all[i];
+        return null;
+    }
+    function root() { return document.querySelector('.vv-player-root'); }
+    function shareWrap() { return document.getElementById('vv-share-wrap'); }
+    function hitShareBtn() {
+        var b = byText('.vv-share-btn', '只复制链接');
+        if (!b) return 'no-btn';
+        var r = b.getBoundingClientRect();
+        var e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return e ? String(e.className || e.tagName) : 'null';
+    }
+
+    async function untilReady() {
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.VV) return window.__vv;
+            await wait(200);
+        }
+        return null;
+    }
+
+    async function main() {
+        var vv = await untilReady();
+        var V = vv && vv.VV;
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        ok('脚本注入且调试句柄挂载', !!vv);
+        ok('Via 里是本次构建 v' + expect, !!V && V.version === expect, V ? V.version : 'none');
+        ok('真机视口确为窄屏（<420px）', window.innerWidth < 420, String(window.innerWidth));
+        ok('小窗 / 分享调试 API 齐全', !!(vv && vv.mini && vv.pip && vv.shareOpen &&
+            vv.shareClose && vv.hasPriorityOverlay));
+        if (!vv) { send({ tag: 'done', pass: pass, fail: fail, errs: errs }); return; }
+        send({ tag: 'diag', phase: 'env', pipEnabled: document.pictureInPictureEnabled,
+            ua: navigator.userAgent.slice(0, 110) });
+        var item = { url: location.origin + '/e2e/flower.mp4', name: '真机测试视频', type: 'MP4', source: 'test' };
+
+        // ---------- 1. 顶栏「画中画」按钮 → 页内小窗 ----------
+        try { vv.open(item); } catch (e) { send({ tag: 'diag', phase: 'openErr', msg: String(e) }); }
+        await wait(1700);
+        var r0 = root();
+        var vid = r0 ? r0.querySelector('video') : null;
+        ok('播放器已打开且 video 有源', !!r0 && !!vid && !!(vid.currentSrc || vid.src),
+            vid ? (vid.currentSrc || '').slice(-32) : 'no video');
+        var pipBtn = document.querySelector('[data-act="pip"]');
+        var pr = pipBtn ? pipBtn.getBoundingClientRect() : null;
+        ok('顶栏画中画按钮在视口内可点', !!pr && pr.width > 20 && pr.left >= 0 && pr.right <= window.innerWidth,
+            pr ? [Math.round(pr.left), Math.round(pr.right), window.innerWidth].join(',') : 'none');
+        if (pipBtn) pipBtn.click();
+        await wait(500);
+        var r1 = root();
+        ok('点画中画后进入页内小窗', !!V._mini && !!r1 && r1.classList.contains('mini'),
+            'mini=' + V._mini);
+        var mr = r1 ? r1.getBoundingClientRect() : null;
+        ok('小窗宽度约为视口 46% 且不超 240', !!mr && mr.width >= 150 && mr.width <= 240 &&
+            mr.width < window.innerWidth / 2, mr ? Math.round(mr.width) : 'none');
+        ok('小窗高度按 16:9 且不超 160', !!mr && mr.height < 160 && mr.height > 80,
+            mr ? Math.round(mr.height) : 'none');
+        ok('小窗完整落在视口内', !!mr && mr.left >= 0 && mr.top >= 0 &&
+            mr.right <= window.innerWidth + 1 && mr.bottom <= window.innerHeight + 1,
+            mr ? [Math.round(mr.left), Math.round(mr.top), Math.round(mr.right), Math.round(mr.bottom)].join(',') : 'none');
+        var topBar = r1 ? r1.querySelector('.vv-cs-top') : null;
+        ok('小窗里全屏控制栏整组隐藏', !!topBar && getComputedStyle(topBar).display === 'none',
+            topBar ? getComputedStyle(topBar).display : 'no bar');
+        var mb = document.getElementById('vv-mini-bar');
+        ok('小窗操作条显示且有还原/关闭两枚按钮', !!mb && getComputedStyle(mb).display !== 'none' &&
+            mb.querySelectorAll('.vv-mini-btn').length === 2,
+            mb ? getComputedStyle(mb).display : 'no bar');
+        ok('小窗时页面解除冻结', document.documentElement.style.overflow !== 'hidden',
+            document.documentElement.style.overflow || '(empty)');
+        ok('小窗里视频没被拆掉', !!vid && !!vid.parentNode && !!V.playerActive,
+            'active=' + V.playerActive);
+
+        // 拖动：构造 TouchEvent，能造就验位置变化；造不出来只记诊断不算失败
+        var beforeLeft = r1 ? parseFloat(r1.style.left) : 0;
+        try {
+            var mkTouch = function (type, x, y) {
+                var t = new Touch({ identifier: 1, target: r1, clientX: x, clientY: y });
+                r1.dispatchEvent(new TouchEvent(type, {
+                    bubbles: true, cancelable: true,
+                    touches: type === 'touchend' ? [] : [t],
+                    targetTouches: type === 'touchend' ? [] : [t],
+                    changedTouches: [t]
+                }));
+            };
+            mkTouch('touchstart', beforeLeft + 40, 40);
+            mkTouch('touchmove', beforeLeft - 30, 90);
+            mkTouch('touchend', beforeLeft - 30, 90);
+            var afterLeft = parseFloat(r1.style.left);
+            ok('小窗可以拖动且不会跑出视口', afterLeft !== beforeLeft && afterLeft >= 0,
+                beforeLeft + ' → ' + afterLeft);
+        } catch (eT) {
+            send({ tag: 'diag', phase: 'touch', msg: 'TouchEvent 不可用：' + String(eT) });
+        }
+
+        // ---------- 2. 还原全屏 ----------
+        var restore = mb ? mb.querySelector('[data-mini="restore"]') : null;
+        if (restore) restore.click();
+        await wait(350);
+        var r2 = root();
+        var rr = r2 ? r2.getBoundingClientRect() : null;
+        ok('点还原后退出小窗', !V._mini && !!r2 && !r2.classList.contains('mini'), 'mini=' + V._mini);
+        ok('还原后铺满视口', !!rr && Math.abs(rr.width - window.innerWidth) < 2 &&
+            rr.height >= window.innerHeight - 2, rr ? Math.round(rr.width) + 'x' + Math.round(rr.height) : 'none');
+        ok('还原后内联尺寸已清空', !!r2 && !r2.style.width && !r2.style.left,
+            r2 ? [r2.style.width, r2.style.left].join('|') : 'none');
+        ok('还原后页面重新冻结', document.documentElement.style.overflow === 'hidden',
+            document.documentElement.style.overflow || '(empty)');
+
+        // ---------- 3. 更多菜单里的小窗入口 ----------
+        try {
+            var more = document.querySelector('.vv-act-row [data-act="more"]');
+            if (more) more.click();
+            await wait(300);
+            var mi = byText('.vv-sheet-item', '页内小窗');
+            ok('更多菜单里有页内小窗入口', !!mi, mi ? mi.textContent.trim().slice(0, 22) : 'none');
+            if (mi) mi.click();
+            await wait(300);
+            ok('菜单项能进入小窗', !!V._mini);
+            var mb2 = document.getElementById('vv-mini-bar');
+            var restore2 = mb2 ? mb2.querySelector('[data-mini="restore"]') : null;
+            if (restore2) restore2.click();
+            await wait(250);
+            ok('菜单进的小窗也能还原', !V._mini);
+        } catch (eM) { send({ tag: 'diag', phase: 'menu', msg: String(eM) }); }
+
+        // ---------- 4. 从嗅探面板「导出」打开外链浮层 ----------
+        try {
+            V.items.push(item);
+            vv.openPanel();
+            await wait(350);
+            var pbtn = document.querySelector('[aria-label="导出给外部播放器"]');
+            ok('嗅探面板里有导出按钮', !!pbtn && !!document.querySelector('.vv-panel-wrap.open'));
+            if (pbtn) pbtn.click();
+        } catch (eP) { send({ tag: 'diag', phase: 'panel', msg: String(eP) }); }
+        await wait(300);
+        ok('导出后外链浮层存在', !!shareWrap());
+        ok('打开浮层时嗅探面板已收起', !document.querySelector('.vv-panel-wrap.open'));
+        ok('浮层按钮立刻可点（没被面板盖住）', /vv-share-btn/.test(hitShareBtn()), hitShareBtn());
+        ok('有浮层时面板巡检会避让', vv.hasPriorityOverlay() === true);
+
+        // 跨过 vvKeepPanelTop 的 2.5 秒巡检：这是「界面自动关闭」的复现窗口
+        await wait(3200);
+        ok('跨过 2.5 秒置顶巡检后浮层仍在', !!shareWrap());
+        ok('跨过巡检后浮层按钮仍可点', /vv-share-btn/.test(hitShareBtn()), hitShareBtn());
+        var lastCls = document.documentElement.lastElementChild
+            ? String(document.documentElement.lastElementChild.className) : '';
+        ok('浮层没被面板/播放器/角标挪到身后',
+            !/vv-panel-wrap|vv-player-root|vv-badge/.test(lastCls), lastCls);
+
+        // ---------- 5. 浮层里的复制 / 导出操作 ----------
+        var cp = byText('.vv-share-btn', '只复制链接');
+        if (cp) cp.click();
+        await wait(250);
+        ok('点「只复制链接」后浮层不关闭', !!shareWrap());
+        ok('复制链接给出明确提示', txt('.vv-toast').indexOf('已复制裸链') >= 0, txt('.vv-toast'));
+        await wait(1100);
+        ok('复制后 1 秒浮层仍在', !!shareWrap());
+        var curl = byText('.vv-share-btn', '复制 curl');
+        if (curl) curl.click();
+        await wait(250);
+        ok('点「复制 curl 命令」后浮层不关闭', !!shareWrap());
+        ok('curl 复制给出明确提示', txt('.vv-toast').indexOf('已复制 curl') >= 0, txt('.vv-toast'));
+        var ex = byText('.vv-share-btn', '导出 .m3u');
+        if (ex) ex.click();
+        // Via 会为 .m3u 下载弹系统界面，页面短暂进入后台、期间 fetch 可能被取消；
+        // 等它回来再一次性上报，别把丢包当成断言失败
+        await wait(1600);
+        ok('点「导出 .m3u」后浮层不关闭', !!shareWrap());
+        ok('导出给出明确提示', txt('.vv-toast').indexOf('已导出') >= 0, txt('.vv-toast'));
+
+        // ---------- 6. 关闭与收尾 ----------
+        var x = document.querySelector('.vv-share-x');
+        if (x) x.click();
+        await wait(250);
+        ok('点关闭后浮层移除', !shareWrap());
+        ok('浮层关掉后巡检不再避让', vv.hasPriorityOverlay() === false);
+        ok('全程没有 JS 报错', errs.length === 0, errs.join(' | ').slice(0, 160));
+
+        send({ tag: 'done', pass: pass, fail: fail, errs: errs });
+        hud.textContent = '完成 ' + pass + '/' + (pass + fail);
+    }
+    main();
+})();
+</script>
+</body>
+</html>

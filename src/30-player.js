@@ -86,7 +86,11 @@ function vvKeepPlayerTop() {
     VV._playerTopTimer = setInterval(function () {
         try {
             if (!VV.playerActive || !ROOT || !ROOT.parentNode) { vvStopPlayerTop(); return; }
-            if (ROOT.style.display === 'none') return; // 小窗模式
+            if (ROOT.style.display === 'none' || VV._mini) return; // 系统画中画 / 页内小窗
+            // 分享 / 选集浮层是挂在 <html> 上的同级层，播放器被它们盖住是**故意的**。
+            // 这里和面板巡检一样必须避让：否则 2.5 秒后播放器被挪回末尾，
+            // 浮层整块消失，真机上看着就是「界面自己关了」。
+            if (vvHasPriorityOverlay()) return;
             // 手指在播放器上时不要重排 DOM，否则可能触发 touchcancel，导致进度条拖了不跳
             if (VV._touchDown || (typeof vvG !== 'undefined' && vvG.progDrag)) return;
             if (vvIsOccluded(ROOT)) vvBringPlayerToFront();
@@ -253,7 +257,8 @@ function vvResumePageMediaNow(list) {
 var ROOT = null, VID = null, BRIGHT = null, TOPBAR = null, BOTBAR = null, CBTN = null,
     CSPLAY = null, CSTIME = null, CSPROG = null, CSBUF = null, CSCUR = null,
     CSPROGDOT = null, LOCKMARK = null, SEEKTIP = null, GESTIP = null,
-    LOADING = null, LOADBAR = null, LOADFILL = null, ERRBOX = null;
+    LOADING = null, LOADBAR = null, LOADFILL = null, ERRBOX = null,
+    MINIBAR = null, MINIDRAG = null;
 
 
 // 环形进度周长（r=19 → 2πr ≈ 119.38）
@@ -284,6 +289,22 @@ function vvEnsurePlayerRoot() {
     VID.setAttribute('x5-playsinline', '');
     VID.setAttribute('preload', 'auto');
     VID.controls = false;
+    // 系统画中画真正可用时（桌面 Chrome / Chrome for Android），进小窗要把整层播放器藏掉，
+    // 但退出时必须把 display 还回来 —— 原来只藏不还原，从小窗返回就是一片黑。
+    VID.addEventListener('enterpictureinpicture', function () {
+        try { if (VV._mini) vvMiniWindow(false); } catch (eM) {}
+        if (ROOT) ROOT.style.display = 'none';
+        vvSetPageFreeze(false);
+    });
+    VID.addEventListener('leavepictureinpicture', function () {
+        if (!ROOT) return;
+        // 已经切到页内小窗了就别把页面重新冻上
+        if (VV._mini) { vvSetPageFreeze(false); return; }
+        ROOT.style.display = '';
+        vvSetPageFreeze(true);
+        vvBringToFront(ROOT);
+        try { vvShowCS(); } catch (eS) {}
+    });
     BRIGHT = vvEl('div', 'vv-bright');
     LOADING = vvEl('div', 'vv-loading');
     LOADING.innerHTML =
@@ -336,8 +357,11 @@ function vvEnsurePlayerRoot() {
     backBtn.id = 'vv-back';
     var title = vvEl('div', 'vv-title', '');
     title.id = 'vv-title';
-    // 右侧三个次要操作收进一枚玻璃胶囊：和标题分开归组，也让它们有统一的 32px 命中框
+    // 右侧次要操作收进一枚玻璃胶囊：和标题分开归组，也让它们有统一的 32px 命中框。
+    // 选集放最左：看剧时切集比画中画/下载频繁，不该埋在「更多」两级菜单里。
     var topActs = vvEl('div', 'vv-top-acts');
+    var epBtn = vvCsBtn('episodes', 'list', 20, '选集（剧集列表）');
+    epBtn.id = 'vv-ep-btn';
     var pipBtn = vvCsBtn('pip', 'pip', 20, '画中画');
     // 两枚全屏按钮并列：fs 是系统沉浸全屏（栏会被隐藏），
     // webfs 是网页铺满（只把站点播放器放大到可视区，不碰浏览器栏）。
@@ -348,6 +372,7 @@ function vvEnsurePlayerRoot() {
     webFsBtn.id = 'vv-pagefs-btn';
     var dlTop = vvCsBtn('download', 'dl', 20, '下载');
     dlTop.addEventListener('click', function () { if (VV.active) vvDownloadItem(VV.active.item); });
+    topActs.appendChild(epBtn);
     topActs.appendChild(pipBtn);
     topActs.appendChild(fsBtn);
     topActs.appendChild(webFsBtn);
@@ -426,6 +451,23 @@ function vvEnsurePlayerRoot() {
     SEEKTIP = vvEl('div', 'vv-seek-tip', '');
     GESTIP = vvEl('div', 'vv-ges-tip', '');
 
+    // 页内小窗的操作条：常驻但不显示，只有 .mini 时才露出来。
+    // 放在 ROOT 里而不是另起一层，closePlayer 回收 ROOT 时一起带走。
+    MINIBAR = vvEl('div', 'vv-mini-bar');
+    MINIBAR.id = 'vv-mini-bar';
+    MINIBAR.innerHTML = '<span class="vv-mini-grip">小窗 · 可拖动</span>' +
+        '<span class="vv-mini-acts">' +
+        '<button class="vv-mini-btn" data-mini="restore" aria-label="还原全屏" title="还原全屏">' + vvIcon('fs', 14) + '</button>' +
+        '<button class="vv-mini-btn" data-mini="close" aria-label="关闭" title="关闭">' + vvIcon('close', 14) + '</button>' +
+        '</span>';
+    MINIBAR.addEventListener('click', function (e) {
+        var b = e.target && e.target.closest ? e.target.closest('.vv-mini-btn') : null;
+        if (!b) return;
+        e.stopPropagation();
+        if (b.getAttribute('data-mini') === 'close') { try { closePlayer(); } catch (eC) {} }
+        else vvMiniWindow(false);
+    }, true);
+
     var sheet = vvEl('div', 'vv-sheet');
     sheet.id = 'vv-sheet';
 
@@ -440,10 +482,18 @@ function vvEnsurePlayerRoot() {
     ROOT.appendChild(LOCKMARK);
     ROOT.appendChild(SEEKTIP);
     ROOT.appendChild(GESTIP);
+    ROOT.appendChild(MINIBAR);
     ROOT.appendChild(sheet);
     document.documentElement.appendChild(ROOT);
 
+    // 小窗拖动绑在 ROOT 上；全屏手势在 vvGesStart/Move/End 里遇到 VV._mini 会让位
+    ROOT.addEventListener('touchstart', vvMiniDragStart, { passive: false });
+    ROOT.addEventListener('touchmove', vvMiniDragMove, { passive: false });
+    ROOT.addEventListener('touchend', vvMiniDragEnd, { passive: false });
+    ROOT.addEventListener('touchcancel', vvMiniDragEnd, { passive: false });
+
     backBtn.addEventListener('click', function () { closePlayer(); });
+    epBtn.addEventListener('click', function () { vvEpisodesOpen(); });
     pipBtn.addEventListener('click', vvTryPip);
     fsBtn.addEventListener('click', vvTryFs);
     webFsBtn.addEventListener('click', vvTogglePageFullscreen);
@@ -1651,15 +1701,19 @@ function vvTogglePlay() {
 
 function vvShowCS() {
     try {
+        // 小窗里控制栏整组隐藏，别再给它挂自动收起计时
+        if (VV._mini) return;
         ROOT.classList.add('cs-on');
         clearTimeout(ROOT._csTimer);
         ROOT._csTimer = 0;
-        // 底部菜单开着时不启动自动收起：用户正在菜单里挑选项，
+        // 底部菜单 / 选集浮层开着时不启动自动收起：用户正在菜单里挑选项，
         // 3 秒后把顶/底栏抽走会让人以为"菜单自己没了"，还得再点一次才回来。
         var sht = document.getElementById('vv-sheet');
         if (sht && sht.classList.contains('open')) return;
+        if (ROOT.classList.contains('ep-open')) return;
         ROOT._csTimer = setTimeout(function () {
-            if (VID && !VID.paused) ROOT.classList.remove('cs-on');
+            // 播放器可能已经关闭（ROOT / VID 被置空），延迟回调不能再碰它们
+            try { if (ROOT && VID && !VID.paused) ROOT.classList.remove('cs-on'); } catch (e) {}
         }, VV.cfg.autoHide);
     } catch (e) {}
 }
@@ -1682,6 +1736,11 @@ function closePlayer() {
     try { if (vvG.progDrag) { vvG.progDrag = false; vvG.mode = 'none'; vvG.gtgt = null; } } catch (eG) {}
     VV.playerActive = false;
     VV.active = null;
+    // 小窗状态跟着播放器一起退场，否则下次开播放器还带着 .mini 的残留尺寸
+    VV._mini = false;
+    MINIDRAG = null;
+    // 选集浮层是挂在 <html> 上的独立层，播放器退场时别把它落单留在页面上
+    try { if (VV._epOpen) vvEpisodesClose(); } catch (eEp) {}
     // 播放器退场后，若「网页铺满」仍开着就把网页那层恢复回来
     try { vvPageFsSync(); } catch (ePF) {}
     try { vvSetPageFreeze(false); } catch (ef) {}
@@ -1722,7 +1781,10 @@ function closePlayer() {
         } catch (eR5) {}
         try { deadVideo = null; deadRoot = null; } catch (eR6) {}
     }, 900);
+    // 关播放器时把自动收起计时也清掉：ROOT 马上要置空，留着它只会在 4.5s 后抛空指针
+    try { if (ROOT && ROOT._csTimer) { clearTimeout(ROOT._csTimer); ROOT._csTimer = 0; } } catch (eCs) {}
     ROOT = null; VID = null; BRIGHT = null; TOPBAR = null; BOTBAR = null; CBTN = null;
+    MINIBAR = null;
     CSPLAY = null; CSTIME = null; CSPROG = null; CSBUF = null; CSCUR = null; CSPROGDOT = null;
     LOCKMARK = null; SEEKTIP = null; GESTIP = null; LOADING = null; LOADBAR = null; LOADFILL = null;
     ERRBOX = null;
@@ -1747,14 +1809,97 @@ function vvToggleLock() {
     vvToast(on ? '已锁定，点右上方图标解锁' : '已解锁');
 }
 
+// 系统画中画在 Via 这类 WebView 里根本不提供：pictureInPictureEnabled 为 false，
+// 硬调 requestPictureInPicture() 只会拿到 NotSupportedError。按钮不能只弹一句
+// 「小窗启动失败」就完事，所以不可用/被拒时降级成页内悬浮小窗。
 function vvTryPip() {
+    if (VV._mini) { vvMiniWindow(false); return; }
     try {
-        if (VID.requestPictureInPicture) {
-            VID.requestPictureInPicture().then(function () { ROOT.style.display = 'none'; vvSetPageFreeze(false); }).catch(function (er) { vvToast('小窗启动失败'); });
+        if (VID && VID.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
+            VID.requestPictureInPicture().then(function () {
+                if (ROOT) ROOT.style.display = 'none';
+                vvSetPageFreeze(false);
+            }).catch(function (er) {
+                vvMiniWindow(true, (er && er.name) || 'reject');
+            });
             return;
         }
     } catch (e) {}
-    vvToast('当前 WebView 不支持小窗');
+    vvMiniWindow(true, 'unsupported');
+}
+
+// 页内小窗：不换源、不重建 video，只把播放器这层缩成一枚可拖动的 fixed 窗口。
+// 控制栏整组隐藏（240px 宽塞不下），页面解除冻结，视频继续播。
+function vvMiniWindow(on, reason) {
+    if (!ROOT || !VV.playerActive) return false;
+    try {
+        if (on) {
+            if (VV._mini) return true;
+            try { if (document.pictureInPictureElement) document.exitPictureInPicture(); } catch (eP) {}
+            VV._mini = true;
+            ROOT.style.display = '';
+            ROOT.classList.add('mini');
+            ROOT.classList.remove('cs-on', 'locked');
+            try { vvHideSheet(); } catch (eH) {}
+            try { if (ROOT._csTimer) { clearTimeout(ROOT._csTimer); ROOT._csTimer = 0; } } catch (eT) {}
+            vvSetPageFreeze(false);
+            var w = Math.max(150, Math.min(240, Math.round(window.innerWidth * 0.46)));
+            var h = Math.round(w * 9 / 16);
+            ROOT.style.width = w + 'px';
+            ROOT.style.height = h + 'px';
+            ROOT.style.left = Math.max(8, window.innerWidth - w - 12) + 'px';
+            ROOT.style.top = Math.max(8, window.innerHeight - h - 24) + 'px';
+            vvBringToFront(ROOT);
+            vvToast(reason && reason !== 'direct'
+                ? '系统小窗不可用，已切到页内小窗（可拖动）'
+                : '已切到页内小窗，拖动可移动位置', true);
+        } else {
+            if (!VV._mini) return true;
+            VV._mini = false;
+            MINIDRAG = null;
+            ROOT.classList.remove('mini');
+            ROOT.style.left = ''; ROOT.style.top = '';
+            ROOT.style.width = ''; ROOT.style.height = '';
+            ROOT.style.display = '';
+            vvSetPageFreeze(true);
+            vvBringToFront(ROOT);
+            vvShowCS();
+        }
+        return true;
+    } catch (e) { return false; }
+}
+
+// 小窗拖动：全屏那套手势在 vvGesStart/Move/End 里遇到 VV._mini 会让位，
+// 这里单独处理；没移动的轻点直接还原全屏。
+function vvMiniDragStart(e) {
+    if (!VV._mini || !ROOT) return;
+    if (e.target && e.target.closest && e.target.closest('.vv-mini-btn')) return;
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    MINIDRAG = {
+        x: t.clientX, y: t.clientY,
+        l: parseFloat(ROOT.style.left) || 0,
+        t: parseFloat(ROOT.style.top) || 0,
+        moved: false
+    };
+    try { e.preventDefault(); } catch (eP) {}
+}
+function vvMiniDragMove(e) {
+    if (!MINIDRAG || !ROOT) return;
+    var t = e.touches && e.touches[0];
+    if (!t) return;
+    var dx = t.clientX - MINIDRAG.x, dy = t.clientY - MINIDRAG.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) MINIDRAG.moved = true;
+    var w = ROOT.offsetWidth || 200, h = ROOT.offsetHeight || 120;
+    ROOT.style.left = Math.max(0, Math.min(window.innerWidth - w, MINIDRAG.l + dx)) + 'px';
+    ROOT.style.top = Math.max(0, Math.min(window.innerHeight - h, MINIDRAG.t + dy)) + 'px';
+    try { e.preventDefault(); } catch (eP) {}
+}
+function vvMiniDragEnd(e) {
+    if (!MINIDRAG) return;
+    var moved = MINIDRAG.moved;
+    MINIDRAG = null;
+    if (!moved) vvMiniWindow(false);
 }
 
 function vvTryFs() {

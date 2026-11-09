@@ -2,6 +2,7 @@ function vvSetupMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     try {
         GM_registerMenuCommand('嗅探结果面板', function () { vvOpenPanel(); });
+        GM_registerMenuCommand('选集（打开剧集列表）', vvEpisodesOpen);
         // 「网页铺满」= 把站点自己的播放器放大到整个可视区，不进系统全屏。
         // 它不碰 Via 的地址栏/底部工具栏（那些是 WebView 之外的系统 UI）。
         // 播放器顶栏那枚「沉浸全屏」是另一套（会隐藏栏），两者互斥。
@@ -15,11 +16,13 @@ function vvSetupMenu() {
         GM_registerMenuCommand('重建播放实例（解码失败/卡死时用）', vvRebuildMedia);
         GM_registerMenuCommand('多页并行播放（当前：' + (VV.cfg.multiPlay ? '开' : '关') + '）', vvToggleMultiPlay);
         GM_registerMenuCommand('后台释放解码器 / 标签页休眠（当前：' + (VV.cfg.hibernate ? '开' : '关') + '）', vvToggleHibernate);
+        GM_registerMenuCommand('选集跳页后自动播放（当前：' + (VV.cfg.epAutoPlay ? '开' : '关') + '）', vvToggleEpAutoPlay);
         GM_registerMenuCommand('强制关闭播放器（页面卡死时用）', vvForceClose);
         GM_registerMenuCommand('资源释放自检（退出后卡顿/不释放时用）', vvReleaseAudit);
         GM_registerMenuCommand('本页让出解码器（其它页面要用）', vvForceRelease);
         GM_registerMenuCommand('清除所有播放进度', vvClearProgress);
         GM_registerMenuCommand('自检（排查未生效）', vvSelfCheck);
+        GM_registerMenuCommand('选集 诊断（列表没出来时用）', vvEpisodesDiagnose);
         GM_registerMenuCommand('关于', vvAbout);
     } catch (e) {}
 }
@@ -68,6 +71,14 @@ function vvClearProgress() {
     vvSet('progress', {});
     VV._pmap = {};
     vvToast('播放进度已清空');
+}
+
+function vvToggleEpAutoPlay() {
+    VV.cfg.epAutoPlay = !VV.cfg.epAutoPlay;
+    vvSet('epAutoPlay', VV.cfg.epAutoPlay);
+    vvToast(VV.cfg.epAutoPlay
+        ? '选集跳页后会自动播放那一集'
+        : '选集跳页后只打开页面，不自动播放', true);
 }
 
 function vvSelfCheck() {
@@ -199,9 +210,9 @@ function vvForceRelease() {
 function vvAbout() {
     try {
         alert('Via 视频嗅探播放器 v' + VV.version +
-            '\n\n功能：视频嗅探·网页铺满（放大站点播放器）·全屏手势播放器·倍速·进度记忆·m3u8·连播·下载' +
-            '\n\n使用：嗅探角标出现后点击打开列表；▶ 播放进内置播放器。' +
-            '\n\n限制：部分站点加密流（blob）无法导出；m3u8 下载需第三方工具。' +
+            '\n\n功能：视频嗅探·网页铺满（放大站点播放器）·全屏手势播放器·选集·倍速·进度记忆·m3u8·连播·下载' +
+            '\n\n使用：嗅探角标出现后点击打开列表；▶ 播放进内置播放器；播放器顶栏「选集」可切换剧集。' +
+            '\n\n限制：部分站点加密流（blob）无法导出；m3u8 下载需第三方工具；用 JS 原地切集且页面不吐出新地址的站点，选集只能替你点一下元素。' +
             '\n\n作者：ViaModes · 本地运行，不上传任何数据');
     } catch (e) {}
 }
@@ -211,6 +222,8 @@ function vvConsumeAutoNext() {
         var f = vvGet('autoNextLast', null);
         if (f && Date.now() - f.ts < 240000) {
             vvDel('autoNextLast');
+            // 用户关掉「选集跳页后自动播放」时，标记照样消费掉，只是不打开播放器
+            if (f.why === 'ep' && !VV.cfg.epAutoPlay) return;
             setTimeout(function () {
                 try {
                     var cand = null;
@@ -218,7 +231,9 @@ function vvConsumeAutoNext() {
                         if (VV.items[i].type !== 'BLOB') { cand = VV.items[i]; break; }
                     }
                     if (cand && VV.playerActive === false) {
-                        vvToast('连播：自动续播下一集', true);
+                        vvToast(f.why === 'ep'
+                            ? '选集：自动播放第 ' + (f.num === undefined ? '' : f.num) + ' 集'
+                            : '连播：自动续播下一集', true);
                         openPlayer(cand);
                     }
                 } catch (e2) {}

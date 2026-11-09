@@ -65,7 +65,9 @@ var VV = {
         // 多页并行播放：开启后多个页面可同时播（缓冲与清晰度自动压缩），关闭则只允许一个
         multiPlay: vvGet('multiPlay', false),
         // 标签页休眠：页面切到后台时摘掉原生 <video> 的 src，真正释放 MediaCodec
-        hibernate: vvGet('hibernate', true)
+        hibernate: vvGet('hibernate', true),
+        // 选集：从播放器里点某一集跳到该页后，自动接着播这一集的视频
+        epAutoPlay: vvGet('epAutoPlay', true)
     }
 };
 
@@ -208,7 +210,9 @@ var VV_ICONS = {
     link: 'M10.5 13.5a3.5 3.5 0 005 0l2.5-2.5a3.5 3.5 0 00-5-5l-1 1M13.5 10.5a3.5 3.5 0 00-5 0L6 13a3.5 3.5 0 005 5l1-1',
     more: 'M5.2 12h1.6M11.2 12h1.6M17.2 12h1.6',
     gear: 'M12 15.2a3.2 3.2 0 100-6.4 3.2 3.2 0 000 6.4zM12 3v2.2M12 18.8V21M4.6 7.9l1.9 1.1M17.5 15l1.9 1.1M4.6 16.1l1.9-1.1M17.5 9l1.9-1.1',
-    check: 'M5 12.5l4.5 4.5L19 7.5'
+    check: 'M5 12.5l4.5 4.5L19 7.5',
+    // 选集：左侧三枚小方块 + 右侧三行，和「更多」的三点区分开
+    list: 'M4 5.5h2.5v2.5H4zM4 10.8h2.5v2.5H4zM4 16h2.5v2.5H4zM9 6.8h11M9 12h11M9 17.3h11'
 };
 // play / pause 用实心：描边三角形在 20px 下会显得细弱，也和其余线性图标分不开层级
 var VV_ICON_FILL = { play: 1, pause: 1 };
