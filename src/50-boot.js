@@ -17,21 +17,6 @@ function vvMain() {
                 // 真机验证「跳页自动续播」这类跨页标记时只能从脚本这一侧读
                 get: vvGet,
                 hlsConfig: vvHlsConfig,
-                // hls.js 是按需编译的：真机验证要能在播放前后各取一次状态，
-                // 确认「没播 m3u8 时没编译」和「播了之后编译成功」。
-                hlsCompile: vvCompileHlsInline,
-                hlsPick: vvPickHlsCtor,
-                hlsState: function () {
-                    return {
-                        state: VV_HLS_COMPILE_STATE,
-                        hasCtor: !!VV_HLS_CTOR,
-                        version: VV_HLS_CTOR ? (VV_HLS_CTOR.version || '') : '',
-                        err: VV._hlsCompileErr || '',
-                        globalHls: typeof window.Hls,
-                        mse: vvHasMse(),
-                        srcLen: (typeof VV_HLS_INLINE === 'string') ? VV_HLS_INLINE.length : -1
-                    };
-                },
                 hlsSeekMode: vvHlsSetSeekMode,
                 diag: vvDiagText,
                 bufAhead: vvBufAhead,

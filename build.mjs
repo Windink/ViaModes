@@ -23,35 +23,19 @@ let body = '';
 const HLS_BANNER = '/*! hls.js 1.7.3 | Copyright (c) 2017 Dailymotion (http://www.dailymotion.com)'
     + ' | Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)'
     + ' | https://github.com/video-dev/hls.js'
-    + ' | 本副本为官方 dist/hls.light.min.js 原样内联（仅去掉 sourceMappingURL 注释行），'
-    + '以字符串形式随脚本分发、首次播放 m3u8 时才编译；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */';
+    + ' | 本副本为官方 dist/hls.light.min.js 原样内联，未修改；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */';
 
 if (existsSync('vendor/hls.light.min.js')) {
     const size = (await statSync('vendor/hls.light.min.js')).size;
     if (size > 20000) {
         let vendor = await readFile('vendor/hls.light.min.js', 'utf8');
-        // 去掉 sourceMappingURL：产物里没有 .map 文件，留着只会让开发者工具反复找 404。
-        vendor = vendor.replace(/\n?\/\/#\s*sourceMappingURL=[^\n]*\s*$/, '');
-        // 按需编译：hls.js 占产物体积的一大半（~386KB），但绝大多数页面根本不播 m3u8。
-        // 原先在 document-start 直接执行，等于每个页面都完整解析一遍这份代码。
-        // 改成字符串字面量后，引擎只需扫描字符串、不建 AST 也不生成字节码，
-        // 真正编译推迟到首次播放 HLS（见 src/30-player.js 的 vvCompileHlsInline）。
-        //
-        // 用模板字面量承载：源码里的引号不用转义，只把反斜杠转一次（108 处），
-        // 体积几乎等于原文件；JSON.stringify 会额外转义 5000 多个双引号，白白多 5KB。
-        // 前提是源码里不能出现反引号或 `${`（否则会被当成插值）。当前 hls.js 两者都没有，
-        // 但换版本时可能出现——这里做校验，命中就自动回退到 JSON 转义，绝不产出坏产物。
-        const tmplSafe = vendor.indexOf('`') < 0 && vendor.indexOf('${') < 0;
-        const inline = tmplSafe
-            ? '`' + vendor.replace(/\\/g, '\\\\') + '`'
-            : JSON.stringify(vendor)
-                .replace(/\u2028/g, '\\u2028')
-                .replace(/\u2029/g, '\\u2029');
         body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://unpkg.com/hls.js@1/dist/hls.light.min.js"];\n';
         body += HLS_BANNER + '\n';
-        body += 'var VV_HLS_INLINE = ' + inline + ';\n';
-        console.log('vendor hls.js inlined as source:', size, 'bytes (compiled on demand,',
-            tmplSafe ? 'template literal' : 'json escaped', ')');
+        body += '(function(){try{' + vendor + '}catch(e){}})();\n';
+        // 站点常在之后注入自家魔改版 hls.js（页面自带的定制构建就是），会覆盖 window.Hls。
+        // 先把我们这份干净的标准版引用抓在全局上，播放时优先用它，避免被页面定制版接管。
+        body += 'try{ if (window.Hls) window.__vvHlsCtor = window.Hls; }catch(e){}\n';
+        console.log('vendor hls.js inlined:', size, 'bytes');
     }
 } else {
     body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://unpkg.com/hls.js@1/dist/hls.light.min.js"];\n';

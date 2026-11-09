@@ -101,12 +101,7 @@ function vvSelfCheck() {
     L.push('本站嗅探: ' + (VV.cfg.siteOff ? '被禁用！(菜单里启用)' : '正常'));
     L.push('全局嗅探: ' + (VV.cfg.enabled ? '正常' : '被关闭！(菜单里开启)'));
     try { L.push('XHR 钩子: ' + (String(XMLHttpRequest.prototype.open).indexOf('_vvUrl') >= 0 ? '已装 ✓' : '未生效 ✗')); } catch (e) { L.push('XHR 钩子: 异常'); }
-    // hls.js 是按需编译的：这里主动取一次，顺便验证内联源码在当前页面真的能编译出来，
-    // 不能看 window.Hls——没播过 m3u8 时它本来就不存在，会误报「缺失」。
-    try {
-        var hcDiag = vvPickHlsCtor();
-        L.push('hls.js: ' + (hcDiag ? ('按需编译可用' + (hcDiag.version ? ' ' + hcDiag.version : '')) : '不可用(仅影响m3u8)'));
-    } catch (e2) { L.push('hls.js: 异常'); }
+    try { L.push('hls.js: ' + (window.Hls && Hls.isSupported() ? '内置可用' : '缺失(仅影响m3u8)')); } catch (e2) { L.push('hls.js: 异常'); }
     try { L.push('资源计时: ' + (window.PerformanceObserver ? 'PerformanceObserver 已启用' : '定时补扫')); } catch (e6) {}
     try { L.push('GM API: ' + ['GM_getValue', 'GM_download', 'GM_xmlhttpRequest'].filter(function (f) { return eval('typeof ' + f) === 'function'; }).length + '/3 可用'); } catch (e3) {}
     L.push('嗅探记录: ' + VV.items.length + ' 条');
@@ -128,11 +123,7 @@ function vvReleaseAudit() {
 
     L.push('播放器层: ' + (root ? '还在页面里 ✗' : '已移除 ✓'));
     L.push('hls 实例残留: ' + pool + (pool ? ' 个 ✗' : ' ✓'));
-    // 只报"已经编译过"的情况：这是在查残留，不该为了显示一行字去编译 386KB
-    try {
-        var hcAudit = window.__vvHlsCtor || window.Hls;
-        if (hcAudit) L.push('hls.js: ' + (hcAudit.version || '已加载'));
-    } catch (e2) {}
+    try { if (window.Hls) L.push('hls.js: ' + (window.Hls.version || '已加载')); } catch (e2) {}
 
     try {
         var vs = document.querySelectorAll('video');

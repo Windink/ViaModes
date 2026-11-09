@@ -83,8 +83,6 @@ try {
     const rows = readRows().filter((r) => r.run === pageTag);
     const env = rows.find((r) => r.tag === 'env') || {};
     const fn = rows.find((r) => r.tag === 'cfgFn') || {};
-    const before = rows.find((r) => r.tag === 'hlsBefore') || {};
-    const after = rows.find((r) => r.tag === 'hlsAfter') || {};
     const inst = rows.find((r) => r.tag === 'cfgInst') || {};
     const fin = rows.find((r) => r.tag === 'done') || {};
 
@@ -102,14 +100,6 @@ try {
     ok('配置函数 capLevelToPlayerSize=false', fn.capSize === false, '=' + JSON.stringify(fn.capSize));
     ok('配置函数 capLevelOnFPSDrop=false', fn.capFps === false, '=' + JSON.stringify(fn.capFps));
     ok('配置函数 startLevel=-1', fn.start === -1, '=' + JSON.stringify(fn.start));
-    // 按需编译：打开 HLS 之前没编译过、也没把 window.Hls 留在页面上
-    ok('hls 源码随脚本下发到真机', before.srcLen > 300000, 'srcLen=' + before.srcLen);
-    ok('打开 HLS 前未编译（真机懒加载生效）', before.state === 0, 'state=' + before.state);
-    ok('打开 HLS 前页面没有 window.Hls', before.globalHls === 'undefined', 'globalHls=' + before.globalHls);
-    ok('播放后按需编译完成', after.state === 1, 'state=' + after.state + ' err=' + (after.err || '-'));
-    ok('编译出了 hls.js 构造函数', after.hasCtor === true, 'hasCtor=' + after.hasCtor +
-        (after.version ? ' v' + after.version : ''));
-    ok('编译没把 window.Hls 留在页面上', after.globalHls === 'undefined', 'globalHls=' + after.globalHls);
     ok('运行时创建了 hls.js 实例', inst.hasHls === true,
         'hasHls=' + inst.hasHls + ' http=' + inst.http + ' parsed=' + inst.parsed);
     if (inst.hasHls === true) {
@@ -123,18 +113,7 @@ try {
             ok('ABR 自动选档生效（currentLevel=-1 即自动模式，未被钉死）', inst.cur === -1 || inst.cur >= 0, 'cur=' + inst.cur);
             ok('多档下仍不压档 autoCap=-1', inst.autoCap === -1, '=' + JSON.stringify(inst.autoCap));
             if (inst.vh > 0) {
-                // 关键证据：能解出画面（说明按需编译出的 hls.js 真的可用，不只是能 new 出来）。
-                // 不能断言"高于最低档"——带宽不足时 ABR 本就该停在低档，那是网络决定的，
-                // 不是脚本压画质；"脚本不压画质"由 autoCap=-1 与三条 capLevel* 断言覆盖。
-                ok('真机解出了画面（按需编译的 hls.js 可用）', inst.vh > 0,
-                    'videoHeight=' + inst.vh);
-                // ABR 已经定档时，再核对「选了哪档就解出哪档」；自动模式（cur=-1）没有可比对象，跳过
-                if (inst.curH > 0) {
-                    ok('解码分辨率与 ABR 所选档一致（链路未被拦）', inst.vh === inst.curH,
-                        'videoHeight=' + inst.vh + ' 当前档=' + inst.curH + 'p cur=' + inst.cur);
-                } else {
-                    console.log('（ABR 尚在自动待定 cur=' + inst.cur + '，跳过档位一致性比对）');
-                }
+                ok('真机实际解码分辨率高于最低档（画质未被压）', inst.vh > inst.lv0H, 'videoHeight=' + inst.vh + ' 最低档=' + inst.lv0H + 'p');
             }
         } else {
             console.log('（无网/单档：未触发多档加查，核心配置断言已覆盖）');
@@ -149,10 +128,9 @@ try {
     }
     console.log('\n画质红线真机验证: ' + (checks.length - fail) + ' passed, ' + fail + ' failed');
     if (inst.hasHls === true) {
-        console.log('  运行时快照：levels=' + inst.levels + ' cur=' + inst.cur +
-            '(对应 ' + (inst.curH || '-') + 'p) next=' + inst.next +
-            '(' + (inst.nextH || '-') + 'p) autoCap=' + inst.autoCap +
-            ' 最低档=' + inst.lv0H + 'p 实际解码 videoHeight=' + inst.vh);
+        console.log('  运行时快照：levels=' + inst.levels + ' 当前档 cur=' + inst.cur +
+            ' next=' + inst.next + ' autoCap=' + inst.autoCap + ' 最低档=' + inst.lv0H +
+            'p 实际解码 videoHeight=' + inst.vh);
     }
     if (!done || !fin) { console.log('!! 未收到 done（' + (fin.err || 'timeout') + '）'); process.exitCode = 1; }
     if (fail) process.exitCode = 1;
