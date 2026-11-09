@@ -61,6 +61,15 @@
             start: fn && fn.startLevel });
 
         // ---- 2) 打开多档 HLS，读运行时实例 ----
+        // 先记一次编译状态：hls.js 现在是按需编译的，没播 m3u8 之前不该已经编译过，
+        // 否则说明"懒加载"没生效，页面还是白付了 386KB 的解析成本。
+        var hs0 = vv.hlsState ? vv.hlsState() : null;
+        send({ tag: 'hlsBefore',
+            state: hs0 && hs0.state,
+            hasCtor: hs0 && hs0.hasCtor,
+            globalHls: hs0 && hs0.globalHls,
+            srcLen: hs0 && hs0.srcLen,
+            mse: hs0 && hs0.mse });
         var item = { url: HLS, name: '画质验证多档流', type: 'HLS', source: 'test' };
         try { vv.open(item); } catch (e) { send({ tag: 'openErr', msg: String(e) }); }
         hud.textContent = '已打开 HLS，等待解析…';
@@ -76,12 +85,19 @@
             if (inst && inst.levels && inst.levels.length) { parsed = true; break; }
         }
         if (parsed) await wait(4000); // 让 ABR 选档 + 首帧解码，再读真实分辨率
+        // 首帧解码偶发偏慢（真机上见过 4s 还没出帧，videoHeight 仍是 0），
+        // 补一个短轮询，别让这条「真的解出了画面」的关键证据被跳过。
+        var vid = document.querySelector('.vv-player-video') || document.querySelector('video');
+        for (var k = 0; k < 10 && !(vid && vid.videoHeight > 0); k++) {
+            try { if (vid && vid.paused) vid.play(); } catch (eK) {}
+            await wait(1000);
+            vid = document.querySelector('.vv-player-video') || document.querySelector('video');
+        }
         act = vv.VV.active;
         inst = act && (act.hls || act.hlsInst);
         var hc = inst ? inst.config : null;
         var lv0 = (inst && inst.levels && inst.levels[0]) || {};
         // 真实解码分辨率：证明 ABR 按带宽选的档确实落到视频元素上（而非被脚本钉死最低档）
-        var vid = document.querySelector('.vv-player-video') || document.querySelector('video');
         var vh = vid ? (vid.videoHeight || 0) : 0;
         send({ tag: 'cfgInst',
             hasHls: !!inst,
@@ -94,9 +110,21 @@
             cur: inst ? inst.currentLevel : -99,
             next: inst ? inst.nextLevel : -99,
             lv0H: lv0.height || 0,
+            // 当前档 / 下一档的高度：用来核对「ABR 选了哪一档，视频元素就解出哪一档」，
+            // 这比"分辨率一定高于最低档"可靠——带宽不够时 ABR 本来就该待在低档。
+            curH: (inst && inst.currentLevel >= 0 && inst.levels[inst.currentLevel] && inst.levels[inst.currentLevel].height) || 0,
+            nextH: (inst && inst.nextLevel >= 0 && inst.levels[inst.nextLevel] && inst.levels[inst.nextLevel].height) || 0,
             vh: vh,
             parsed: parsed,
             http: act ? (act._lastHttpCode || 0) : 0 });
+        // 播放后：按需编译应该已经完成，且没把 window.Hls 留在页面上
+        var hs1 = vv.hlsState ? vv.hlsState() : null;
+        send({ tag: 'hlsAfter',
+            state: hs1 && hs1.state,
+            hasCtor: hs1 && hs1.hasCtor,
+            version: hs1 && hs1.ver,
+            err: hs1 && hs1.err,
+            globalHls: hs1 && hs1.globalHls });
         hud.textContent = 'hasHls=' + (!!inst) + ' levels=' +
             ((inst && inst.levels) ? inst.levels.length : 0) + ' autoCap=' +
             (inst ? inst.autoLevelCapping : -99);

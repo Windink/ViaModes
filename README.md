@@ -2,7 +2,7 @@
 
 一个适用于 **Via 浏览器（Android）** 的油猴脚本（UserScript），实现「网页视频嗅探 + 全屏沉浸播放器」体验。
 
-- 产物：`dist/via-video-player.user.js`（单文件，~780KB，内含 hls.js）
+- 产物：`dist/via-video-player.user.js`（单文件，~785KB，内含 hls.js 源码，首次播放 m3u8 时才编译）
 - 无需 npm 依赖，`node build.mjs` 即可从 `src/` 合并构建
 
 ## 功能
@@ -165,7 +165,7 @@
 - **锁屏**防误触；控制栏 4.5 秒自动隐藏；底部菜单打开期间不自动收起，点画面任意空白处即可关闭
 - **片头/片尾标记**：手动标记一次，之后自动跳过
 - **连播**：自动识别 URL 数字规律（`cand.m3u8` → `cand2.m3u8`）/ 同页下一集链接，播完自动继续
-- m3u8 自动加载 hls.js（已内联，失败时自动按 fastly/jsdelivr/unpkg 顺序降级）
+- m3u8 首次播放时才编译内联的 hls.js（源码以字符串随脚本下发，不播视频的页面不用为它付解析成本）；编译失败时按 inline script → fastly/jsdelivr/unpkg 顺序降级
 - **画中画 / 页内悬浮小窗**：系统画中画可用时走 `requestPictureInPicture()`，退出小窗时把播放器层还原（原先只藏不还原，返回是一片黑）；Via 这类 WebView 不提供系统画中画（实测 `pictureInPictureEnabled=false`、调用抛 `NotSupportedError`），按钮会自动降级成页内悬浮小窗——按视口 46%（封顶 240px）缩成 16:9 的可拖动浮窗，带「还原全屏 / 关闭」，轻点小窗也能还原；小窗里全屏控制栏与亮度/音量/seek 手势让位给拖动手势，页面解除冻结可以继续刷。更多菜单里也有「页内小窗（悬浮播放）」入口
 - **播放态低特效（默认开）**：视频在播时展开更多菜单，半屏 `blur(20px)` 要跟着每帧重采样，真机实测长帧率从 0.21% 涨到 29.87%。默认给播放器根层挂 `.vv-lowfx`，菜单 / 加载框 / 错误卡片改用更实的背景并关掉大面积 `backdrop-filter`，顶栏 8px 小胶囊保留。想恢复毛玻璃：更多 → 设置 →「界面毛玻璃」，或脚本菜单「播放界面毛玻璃」，切换立即生效。详见下方「播放态掉帧」一节
 - 全屏（横竖屏）
@@ -390,6 +390,30 @@ v0.1.60 真机复验：`glass`（强制把毛玻璃加回来）长帧率 39.33%�
 工具：`node scripts/perf-playback.mjs`（桌面播放态基准）、`node scripts/mumu-perf-play.mjs`（真机帧率探针）。
 桌面那份必须解除 headless 的 60Hz 节流，并垫一层只走 transform 的动态像素逼模糊层重采样，
 否则三场景都会被钉成 17ms / 0 掉帧，什么都测不出来。
+
+### hls.js 按需编译：不播视频的页面不付这份成本
+
+hls.js 是脚本里最大的单体依赖（light 构建 385KB，占产物一半以上），但绝大多数页面
+根本不播 m3u8。原先它作为 IIFE 在 `document-start` 直接执行，等于每个页面都完整解析、
+编译一遍这份代码。现在改成：源码以字符串随产物下发，首次真要播 HLS 时才用 `new Function` 编译。
+字符串字面量只需扫描、不建 AST 也不生成字节码，成本远低于同等体量的代码。
+
+几个必要细节：
+
+- 编译时先遮蔽 `module` / `define` / `exports`，强制 hls.js 的 UMD 头走全局分支，
+  否则构造函数会被塞进 CommonJS/AMD 的导出里，我们拿不到
+- 编译完把 `globalThis.Hls` 还原成页面原值，只留自己的引用，不污染站点自己的构建
+- 优先用这份标准版，页面注入的定制版只作兜底（定制版常见表现是清单能解析、分片进不了
+  SourceBuffer，最后黑屏）
+- CSP 禁止 `eval` 时依次降级：inline `<script>` 注入源码（走站点自己的 `script-src`）→
+  CDN 链 → `GM_xmlhttpRequest` → 系统原生 HLS，不会因为编译失败就播不了
+- 「能不能用 hls.js」改成判真实的 MSE 能力（`vvHasMse`），不能判「构造函数在不在」——
+  按需编译后没播过 HLS 的页面本来就没有构造函数，会把「有 MSE」误判成「没有」
+
+真机验证（`node scripts/mumu-quality.mjs`，MuMu + Via 7.3.3 / WebView 110）：
+打开页面时 `hlsState().state=0`、`window.Hls` 为 `undefined`、源码 385673 字符在场；
+打开多档 HLS 后 `state=1`、构造函数就绪、`window.Hls` 仍为 `undefined`，
+hls 实例正常建起来并解出画面（`videoHeight=480`，最低档 184p）。21 项断言全过。
 
 ### 多标签页 / 多播放器（真机实测）
 
@@ -637,6 +661,17 @@ Android 15 / x86_64 / 系统 WebView 110、Via 7.3.3。
 - 结果（脚本 v0.1.60）：`glass` 平均帧间隔 23.47ms、长帧率 39.33%；`lowfx` 18.14ms / 7.16%，净代价 +29% 平均帧间隔、+32.17pp 长帧率。优化前基线（v0.1.59 默认带毛玻璃）是 22.34ms / 29.87%，关掉模糊 16.70ms / 0.21%。
 - `scripts/perf-playback.mjs` 是桌面版对照，但 SwiftShader 软件合成只能测到 +14% 平均帧间隔，噪声大；**定量结论以真机探针为准**。
 
+### 画质红线 / hls 按需编译真机验证（MuMu + Via）
+
+- `e2e/quality-android.html`：打开一个 5 档公开 HLS，先报 `hlsState()` 再报运行时实例配置、
+  `autoLevelCapping`、当前档高度与 `videoHeight`，POST 到 `/__report`；每轮带唯一标识。
+- `scripts/mumu-quality.mjs`：连 adb → `reverse tcp:8099` → 重启 Via 打开测试页 → 汇总断言。
+
+结果（Via 7.3.3 / Android 15 / WebView 110，视口 360×520，脚本 v0.1.65）：**21 项全过**。
+两条证据链：`capLevelToPlayerSize/capLevelOnFPSDrop=false`、`startLevel=-1`、单实例
+`autoLevelCapping=-1`（脚本不压档）；以及打开前 `hlsState().state=0`、`window.Hls` 为空，
+播放后 `state=1`、实例解出画面（`videoHeight` 与 ABR 所选档一致）。
+
 ### 小窗 / 导出浮层真机验证（MuMu + Via）
 
 桌面 Chromium 里系统画中画是可用的，测不出 Via WebView 110 的 `NotSupportedError`；
@@ -739,10 +774,10 @@ src/
   45-pagefs.js   网页铺满（原名页面全屏）：状态机、目标选取（video/shadow/iframe/canvas）、CSS 与 shadow/iframe 内注入、退出还原、巡检
   46-episodes.js 选集：集数文本识别 / URL 模板分组 / 页面链接与嗅探直链两类来源 / 网格浮层 / 跳页续播与原地切集
   50-boot.js     启动流程（DOM ready 后初始化）
-vendor/hls.light.min.js   构建时内联（网络不可达时自动降级为 CDN 懒加载）
+vendor/hls.light.min.js   以源码字符串内联，首次播放 m3u8 时才编译（编译不了则降级 inline script / CDN）
 build.mjs        合并 → dist/via-video-player.user.js → node --check
 CHANGELOG.md     逐版本变更记录（「未发布」段由 build.mjs 自动定版）
-scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动/选集识别与分组/页内小窗状态机/系统画中画降级/置顶巡检避让/播放态低特效/时间文案与进度条写入节流 331 项断言）
+scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动/选集识别与分组/页内小窗状态机/系统画中画降级/置顶巡检避让/播放态低特效/时间文案与进度条写入节流/hls 按需编译 344 项断言）
 scripts/serve.mjs  E2E 静态服务器（含 mp4/m3u8 MIME 与 Range；`?noRange=1` 模拟不可跳转；`/guard/*` 强制 Referer）
 scripts/e2e-verify.mjs  无头 Chrome 真实链路验证（起服务器→嗅探→播放→seek→切档→诊断→外链自检，48 项）
 scripts/ui-verify.mjs  UI/交互层功能矩阵（真实 Touch/Mouse 事件：手势/倍速/画质/锁屏/菜单交互/进度记忆/加载进度/失败卡片，98 项）
@@ -803,7 +838,7 @@ node scripts/android-close-tab.mjs --mode=hls     # 同上，走 MSE 路径
 ```
 
 `e2e-verify.mjs` 会自动起本地服务器、驱动无头 Chrome 走完整链路，并在 URL 带 `?vvdebug=1` 时
-用到 `window.__vv` 调试句柄（`VV` / `hlsConfig` / `hlsSeekMode` / `diag`），不影响普通用户。
+用到 `window.__vv` 调试句柄（`VV` / `hlsConfig` / `hlsSeekMode` / `hlsState` / `hlsCompile` / `diag`），不影响普通用户。
 
 ## License
 
@@ -812,8 +847,10 @@ node scripts/android-close-tab.mjs --mode=hls     # 同上，走 MSE 路径
 ### 第三方组件
 
 - **hls.js 1.7.3** — Copyright (c) 2017 Dailymotion，Apache License 2.0。
-  `vendor/hls.light.min.js` 是官方 `dist/hls.light.min.js` 的原样内联副本，未作修改；
-  构建时会在产物中补上保留型注释 banner（`/*! … */`），载明版权、许可与来源。
+  `vendor/hls.light.min.js` 是官方 `dist/hls.light.min.js` 的原样内联副本（只去掉了
+  `//# sourceMappingURL` 注释行，因为产物里不带 `.map`），以字符串形式随脚本分发，
+  首次播放 m3u8 时用 `new Function` 编译；构建时在产物中补上保留型注释 banner（`/*! … */`），
+  载明版权、许可与来源。
   许可证全文见 `vendor/LICENSE-hlsjs`（hls.js 自身声明，含对 video.js HLS 库派生部分的说明）
   与 `vendor/LICENSE-Apache-2.0`（Apache License 2.0 全文）。
 

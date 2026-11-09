@@ -1016,10 +1016,67 @@ function vvCanNativeHls() {
     try { return !!(VID && VID.canPlayType && VID.canPlayType('application/vnd.apple.mpegurl')); } catch (e) { return false; }
 }
 
-// 优先用构建时内联的标准版 hls.js：很多站点会往页面里注入自家魔改版并覆盖 window.Hls
-// （页面注入的是定制版），第三方再拿它 new 实例时行为完全不可控，常见表现就是
-// 主清单能解析、分片却永远进不了 SourceBuffer，最后只剩黑屏。
-function vvPickHlsCtor() {
+// MSE 能力判断。hls.js 只能在 MSE 上工作，所以「这台 WebView 有没有 MSE」才是
+// 能不能走 hls.js 的硬条件；不能拿「hls.js 构造函数在不在」代替，因为构造函数
+// 现在是按需编译的（见 vvCompileHlsInline），没用之前本来就不存在。
+function vvHasMse() {
+    try {
+        return typeof window.MediaSource !== 'undefined' || typeof window.ManagedMediaSource !== 'undefined';
+    } catch (e) { return false; }
+}
+
+// —— hls.js 按需编译 ——
+// 构建时 hls.js 以字符串形式内联（VV_HLS_INLINE），这里在首次真正要播 m3u8 时才编译。
+// 收益：不播视频的页面完全不用为这 ~386KB 付解析代价，而字符串字面量的解析成本
+// 远低于同等体量的代码（不建 AST、不做作用域分析、不生成字节码）。
+//
+// 细节：
+// - 先遮蔽 module / define，避免 hls.js 的 UMD 头走 CommonJS / AMD 分支（那样
+//   构造函数会被塞进 exports 而不是挂到全局，我们就拿不到）。
+// - 执行完把 globalThis.Hls 还原成页面的原值，只留自己的引用，不污染站点环境。
+// - CSP 禁止 eval 时这里会抛异常，返回 null，交给 vvLoadHls 走 inline script / CDN 兜底。
+var VV_HLS_CTOR = null;      // 编译成功后的构造函数（不保证当前环境 isSupported）
+var VV_HLS_COMPILE_STATE = 0; // 0 未尝试 / 1 编译成功 / 2 编译失败
+function vvCompileHlsInline() {
+    if (VV_HLS_COMPILE_STATE === 1) return VV_HLS_CTOR;
+    if (VV_HLS_COMPILE_STATE === 2) return null;
+    VV_HLS_COMPILE_STATE = 2;
+    var src = (typeof VV_HLS_INLINE === 'string') ? VV_HLS_INLINE : '';
+    if (src.length < 20000) return null;
+    var hadOwn = false, prevHls;
+    try {
+        hadOwn = Object.prototype.hasOwnProperty.call(window, 'Hls');
+        prevHls = window.Hls;
+    } catch (eP) {}
+    try {
+        var fn = new Function('var module=void 0,define=void 0,exports=void 0;\n'
+            + src
+            + '\n;return (typeof Hls !== "undefined") ? Hls : null;');
+        var got = fn();
+        // 只确认"编译出了构造函数"。能不能用（MSE / codec 支持）交给 vvPickHlsCtor 判，
+        // 否则在没有 MSE 的环境里会把编译成功误判成失败，连降级路径都走不通。
+        if (got && typeof got === 'function') {
+            VV_HLS_CTOR = got;
+            VV_HLS_COMPILE_STATE = 1;
+            try { delete VV._hlsCompileErr; } catch (eD) {}
+            return got;
+        }
+        // 源码跑完了却没拿到构造函数（UMD 被站点环境带偏，比如 page 有 AMD loader）：
+        // 记下原因，让 vvLoadHls 的 inline script 兜底能接管
+        VV._hlsCompileErr = 'compiled but no Hls export';
+    } catch (eC) {
+        VV._hlsCompileErr = (eC && eC.message) ? String(eC.message).slice(0, 120) : 'compile failed';
+    } finally {
+        // 还原页面原来的 Hls（可能没有），避免我们这份覆盖站点自己正在用的构建
+        try {
+            if (hadOwn) window.Hls = prevHls;
+            else if (typeof window.Hls !== 'undefined') delete window.Hls;
+        } catch (eR) {}
+    }
+    return null;
+}
+
+function vvTakeHlsGlobal() {
     try {
         var own = window.__vvHlsCtor;
         if (own && typeof own.isSupported === 'function' && own.isSupported()) return own;
@@ -1031,8 +1088,17 @@ function vvPickHlsCtor() {
     return null;
 }
 
-function vvHasMseHls() {
-    return !!vvPickHlsCtor();
+// 取 hls.js 构造函数：内联的标准版优先，其次才是页面自己的。
+// 顺序不能反——很多站点会往页面里注入自家魔改版并覆盖 window.Hls（页面注入的是定制版），
+// 第三方再拿它 new 实例时行为完全不可控，常见表现就是主清单能解析、分片却永远进不了
+// SourceBuffer，最后只剩黑屏。
+function vvPickHlsCtor() {
+    var inl = vvCompileHlsInline();
+    if (inl && typeof inl.isSupported === 'function' && inl.isSupported()) {
+        try { window.__vvHlsCtor = inl; } catch (eS) {}
+        return inl;
+    }
+    return vvTakeHlsGlobal();
 }
 
 function vvLoadMedia(item) {
@@ -1088,8 +1154,10 @@ function vvLoadMedia(item) {
             }
             vvToast('系统不支持原生 HLS，改用 hls.js', true);
         }
-        // 系统 WebView 支持原生 HLS 且没有 MSE 能力时直接走原生，省去 CDN 等待
-        if (!vvHasMseHls() && vvCanNativeHls()) {
+        // 连 MSE 都没有的 WebView 上 hls.js 一定跑不起来，系统能原生解 m3u8 就直接走原生，
+        // 省掉按需编译与 CDN 的等待。这里判 MSE 而不是判「hls.js 在不在」——构造函数是
+        // 按需编译的，没播过 HLS 时本来就不存在，拿它判断会永远成立。
+        if (!vvHasMse() && vvCanNativeHls()) {
             if (VV.active) VV.active._nativeTried = true;
             vvAttachDirect(url, false);
             vvToast('使用系统 HLS 播放');
@@ -1415,6 +1483,24 @@ function vvLoadHls(cb) {
         cb(true, own);
         return;
     }
+    // 内联源码在，但 new Function 被站点的 CSP 拦了（缺少 unsafe-eval）：
+    // 退一步交给浏览器正常的脚本解析器编译，走站点自己的 script-src 策略。
+    // 这一步比去 CDN 拉快得多，也不依赖网络。
+    if (VV_HLS_COMPILE_STATE === 2 && VV._hlsCompileErr
+        && typeof VV_HLS_INLINE === 'string' && VV_HLS_INLINE.length > 20000) {
+        try {
+            var el = document.createElement('script');
+            el.textContent = VV_HLS_INLINE;
+            document.documentElement.appendChild(el);
+            try { if (el.parentNode) el.parentNode.removeChild(el); } catch (eRm) {}
+            var gotInline = vvTakeHlsGlobal();
+            if (gotInline) {
+                try { window.__vvHlsCtor = gotInline; } catch (eS0) {}
+                cb(true, gotInline);
+                return;
+            }
+        } catch (eInl) {}
+    }
     var urls = VV_HLS_URLS;
     var idx = 0;
     function tryNext() {
@@ -1563,8 +1649,9 @@ function vvBindVideo() {
         vvHideLoading();
         if (!VID) return;
         var act = VV.active;
-        // 系统原生 HLS 失败时回退 hls.js（只尝试一次，避免来回切换）
-        if (act && act.item && act.item.type === 'HLS' && act._nativeTried && !act.hls && !act._nativeFailed && vvHasMseHls()) {
+        // 系统原生 HLS 失败时回退 hls.js（只尝试一次，避免来回切换）。
+        // 判 MSE 而不是判构造函数：hls.js 是按需编译的，此刻还没编译过。
+        if (act && act.item && act.item.type === 'HLS' && act._nativeTried && !act.hls && !act._nativeFailed && vvHasMse()) {
             act._nativeFailed = true;
             vvToast('系统 HLS 播放失败，改用 hls.js', true);
             vvLoadMedia(act.item);
