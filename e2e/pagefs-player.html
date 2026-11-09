@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>播放器顶栏「页面全屏」按钮 · 真机验证</title>
+<style>
+  html, body { margin: 0; background: #f5f5f7; color: #222; font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 10px 12px; background: #fff; border-bottom: 1px solid #e5e5e5; }
+  header b { font-size: 15px; }
+  header span { display: block; font-size: 12px; color: #888; }
+  #hud { position: fixed; left: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); z-index: 2147483647;
+         background: rgba(0,0,0,.86); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+         padding: 7px 9px; border-radius: 8px; white-space: pre-wrap; word-break: break-all;
+         max-width: 92vw; pointer-events: none; }
+  .card { margin: 10px 12px; background: #fff; border-radius: 8px; padding: 10px; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+<header>
+  <b>播放器顶栏「页面全屏」</b>
+  <span id="sub">等待脚本就绪…</span>
+</header>
+<div class="card">这个页面只做一件事：打开内置播放器 → 点顶栏「页面全屏」按钮 → 看状态、是否发起系统全屏、Via 地址栏是否还在。</div>
+<div class="card">
+  <video id="pagev" muted playsinline preload="auto" src="/e2e/flower.mp4" style="width:100%;height:120px;background:#000"></video>
+</div>
+<div id="hud">启动中…</div>
+
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+    var hud = document.getElementById('hud');
+    var sub = document.getElementById('sub');
+    var lines = [];
+    function log(s) { lines.push(s); hud.textContent = lines.slice(-10).join('\n'); console.log('VVPAGEFSBTN|' + s); }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    // 统计系统全屏调用：页面全屏这条路径一次都不该出现
+    window.__fsCalls = 0;
+    try {
+        var orig = Element.prototype.requestFullscreen;
+        Element.prototype.requestFullscreen = function () { window.__fsCalls++; return orig ? orig.call(this) : Promise.resolve(); };
+    } catch (e) {}
+
+    async function run() {
+        sub.textContent = '打开内置播放器…';
+        log('env :: vp ' + innerWidth + 'x' + innerHeight + ' dpr ' + window.devicePixelRatio);
+        window.__vv.open({ url: location.origin + '/e2e/flower.mp4', name: '真机按钮验证', type: 'MP4' });
+        await wait(1200);
+
+        var wf = document.querySelector('.vv-cs-top [data-act="webfs"]');
+        var fs = document.querySelector('.vv-cs-top [data-act="fs"]');
+        var root = document.querySelector('.vv-player-root');
+        var pv = root ? root.querySelector('video') : null;
+        log('按钮 :: ' + (wf ? '存在' : '缺失') +
+            ' | 标题 "' + (wf ? wf.title : '-') + '"' +
+            ' | fs 标题 "' + (fs ? fs.title : '-') + '"');
+        log('按钮顺序 :: ' + Array.prototype.map.call(
+            document.querySelectorAll('.vv-cs-top .vv-top-acts .vv-csbtn'),
+            function (b) { return b.getAttribute('data-act'); }).join(','));
+        log('播放器 :: ' + (root ? getComputedStyle(root).position + ' ' +
+            Math.round(root.getBoundingClientRect().width) + 'x' + Math.round(root.getBoundingClientRect().height) : '未打开'));
+
+        if (wf) wf.click();
+        await wait(400);
+        var st = window.__vv.pageFs();
+        log('点击后 :: on=' + st.on + ' kind=' + (st.kind || '-') + ' suspended=' + st.suspended +
+            ' player=' + st.player + ' shade=' + (st.shade ? 1 : 0));
+        log('按钮态 :: class="' + (wf ? wf.className : '') + '" aria-pressed=' + (wf ? wf.getAttribute('aria-pressed') : '-'));
+        log('系统全屏调用次数 :: ' + window.__fsCalls + '（页面全屏应为 0）');
+        log('退出胶囊 :: ' + (document.getElementById('vv-pagefs-exit')
+            ? (/hide/.test(document.getElementById('vv-pagefs-exit').className) ? '已隐藏（顶栏有按钮）' : '显示')
+            : '无'));
+        log('播放器是否仍铺满 :: ' + (root ? Math.round(root.getBoundingClientRect().height) + 'px / vp ' + innerHeight + 'px' : 'n/a'));
+        sub.textContent = '看顶部 Via 地址栏是否还在；播放器顶栏「页面全屏」是否点亮';
+
+        // 播放器盖住了页面 HUD，关掉它再把汇总显示出来读数
+        await wait(2200);
+        window.__vv.close();
+        await wait(600);
+        var st2 = window.__vv.pageFs();
+        log('关播放器后 :: on=' + st2.on + ' suspended=' + st2.suspended +
+            ' 页面视频=' + (st2.video ? '已接管' : '未接管') + ' shade=' + (st2.shade ? 1 : 0));
+        log('总系统全屏调用 :: ' + window.__fsCalls);
+        log('END');
+    }
+
+    var tries = 0;
+    var t = setInterval(function () {
+        if (window.__vv && window.__vv.pageFs && window.__vv.open) {
+            clearInterval(t);
+            setTimeout(function () { run().catch(function (e) { log('ERR :: ' + (e && e.message || e)); }); }, 400);
+        } else if (++tries > 100) { clearInterval(t); log('ERR :: __vv 未挂载'); }
+    }, 100);
+})();
+</script>
+</body>
+</html>

@@ -24,6 +24,28 @@
 - 角标 / 面板 / 播放器每 2.5 秒采样检测，只有实际被广告盖住才重新置顶；拖动角标或滑动面板时暂停检测，避免打断操作
 - 播放器重排使用原子移动，实测不会中断 `<video>` 播放、不会重置进度
 
+### 网页铺满（原名「页面全屏」）
+- 两个入口：脚本菜单「网页铺满 开/关」，以及**播放器顶栏「沉浸全屏」右侧紧邻的「网页铺满」按钮**（开着时点亮）；两条路径共用同一状态源，任意一边开关另一边都会同步
+- 做的事只有一件：**把站点自己的播放器（`<video>` / iframe / canvas）放大到整个 WebView 可视区**，不用先打开嗅探播放器。**不调用 `requestFullscreen()`**
+- **边界（实测结论，别再按「保留状态栏」理解）**：Via 的地址栏、底部工具栏是 WebView 之外的系统 UI，本功能一概不碰；栏显示与否 100% 由 Via 自己的「下滑隐藏、上滑显示」决定。所以
+  - 栏本来就在 → 开启后仍在，视频从页面里的小窗变成铺满可视区（这是它的全部价值）
+  - 栏已被滚动藏起 → 还是藏着，JS 叫不回来（`scrollTo` 没有手势，Via 不认）；本功能也**不锁页面滚动**，你像平时一样上滑，Via 自己就把栏显示回来。曾经写过「上滚几个像素叫回栏 + `overflow:hidden` 锁滚动」，真机 A/B 证明无效且让手势失效，已删
+- 播放器打开时，网页层右上角那枚「退出网页铺满」胶囊会自动隐藏（顶栏已经有按钮了，不叠两个出口）；关掉播放器后恢复
+- 与播放器顶栏那枚「沉浸全屏」是两套独立模式：后者走 `ROOT.requestFullscreen()`，属于系统全屏，会把浏览器栏一起隐藏。两者互斥，用户或站点进入系统全屏时网页铺满自动让位
+- 只用 class + `!important` CSS，不写 `<video>` 的 inline style、不搬动 video 节点：MSE / `blob:` 流脱离原节点就黑屏，退出时摘掉 class 即零残留
+- 自动挑「正在播放 / 可见面积最大」的主画面；站点延迟插入视频时，1.5 秒巡检会在它出现后自动铺满，视频被移除时自动收起遮罩
+- **主画面不在顶层文档也能认**（这三种以前都是「点了完全没反应」）：
+  - `<video>` 在 **open shadow root** 里（自研播放器常见）：外层样式表穿不进 shadow root，所以把同一份规则**注入到 root 内部**再挂 class
+  - `<video>` 在 **iframe** 里：把 iframe 本身拉满；同源时再往里注入样式，让内层视频跟着满（否则只是空框变大）；跨域读不到 `contentDocument`，按面积识别（≥15% 视口）
+  - 画面被画在 **canvas** 上、`<video>` 只是 0 尺寸解码器：video 和 iframe 都挑不出来时才用 canvas 兜底，避免背景动画 canvas 抢走真视频
+- 视频与 iframe 之间按「面积 + 是否在播」比较取大者，防止顶层小广告 video 顶掉 iframe 里的大播放器
+- 菜单里的「网页铺满 诊断（点了没反应时用）」会报出页面上 video / shadow video / iframe / canvas 各有几个、最终选中的是哪个、尺寸多少——排查时不用猜
+- 祖先链的 `transform / filter / perspective` 会把 `position:fixed` 退化成相对该祖先定位（表现为「铺满后视频还缩在原来那一小块」），只给 computed 值非默认的祖先临时清掉，退出还原
+- 右上角常驻「退出网页铺满」胶囊：Via 没有 Esc 键，必须有可见出口；放右上而不是右下，避免和底部工具栏区域抢位置
+- 层级：黑底遮罩 `2147483000` < 铺满画面 `2147483001` < 角标 / 嗅探面板 / 退出按钮 `2147483647`，铺满期间脚本 UI 依然可点
+- 内置播放器打开时自动挂起网页层、关闭后恢复；「强制关闭播放器」逃生门会一并退出网页铺满，避免黑底遮罩被误认成页面卡死
+- 不自动开启、不持久化状态：刷新后仍是关闭，符合「只保留手动全屏按钮」的约定
+
 ### 流畅度优化（针对“视频卡”）
 - 嗅探不再在每次 DOM 变动时全量扫描整页：MutationObserver 只处理新增节点，150ms 合批、每批最多 120 个节点
 - XHR/fetch 文本扫描先做 `.m3u8 / .mp4 / ...` 低成本预检，避免对每个 JSON 响应都跑大正则
@@ -100,7 +122,8 @@
 - 全屏自制 HTML5 播放器，不依赖 Via 自带的播放组件；手势、倍速、画质等交互全部自实现，目标是接近主流手机浏览器「点开即全屏、手势控进度」的沉浸播放体验
 - **界面**（重做过一轮，目标是"看起来像现在的播放器"而不是 2015 年的 demo）：
   - 图标统一成一套 `24×24 / 描边 1.8 / currentColor` 的 SVG（`vvIcon()`）。此前 `🔒` 是黄色 emoji、`⏸ ⧉ ⋯ ⭳` 是文字字形、PiP 与全屏又各是一枚内联 SVG，四套视觉语言混在同一条控制栏里
-  - 顶栏 `[返回] 标题 …… [画中画｜全屏｜下载]`，右侧三件收进一枚玻璃胶囊；顶部遮罩从 ~60px 加到 ~96px，标题不再悬在画面上
+  - 顶栏 `[返回] 标题 …… [画中画｜沉浸全屏｜网页铺满｜下载]`，右侧四件收进一枚玻璃胶囊；顶部遮罩从 ~60px 加到 ~96px，标题不再悬在画面上
+  - **两枚全屏按钮并列**：`沉浸全屏` 走 `ROOT.requestFullscreen()`（系统沉浸，可能隐藏状态栏）；`网页铺满` 只把站点播放器放大到可视区、不碰浏览器栏，开着时按钮点亮成蓝色并带 `aria-pressed="true"`。点其中一枚会静默关掉另一枚，不会把两套全屏叠在一起
   - 底栏两行：进度行（当前时间 · 轨道 · 总长）＋ 动作行 `[播放][下一集] …… [清晰度][倍速][锁][更多]`
   - **清晰度**从「更多 → 画质」两级深处提为常驻胶囊，只在多码率 HLS 时出现；**倍速**胶囊只显示倍速本身（原来挤着「1.5x · 自动·200P」三段信息）
   - 进度条热区 34px、可视轨道 3px；拖动时轨道放大到 5px、拇指 13→15px，时间气泡吸附在拇指正上方而不是浮在画面中央
@@ -137,6 +160,8 @@
 
 ### 脚本菜单（Via 菜单 → 脚本）
 - 嗅探结果面板 / 全局嗅探开关 / 本站开关（禁刷某站）
+- 网页铺满 开/关（把站点播放器放大到可视区，不进系统全屏）
+- 网页铺满 诊断（点了没反应时用）：报出页面里 video / iframe / canvas 数量与最终选中的目标
 - 默认倍速切换 / 清除所有进度 / 关于
 - 重建播放实例 / 强制关闭播放器
 - 多页并行播放（开关）
@@ -485,7 +510,49 @@ Android 15 / x86_64 / 系统 WebView 110、Via 7.3.3。
 
 截图：`e2e/screenshot-badge.jpg`（角标）、`e2e/screenshot-panel.jpg`（列表）、`e2e/screenshot-mp4.jpg`、`e2e/screenshot-hls.jpg`、`e2e/share-probe.png`（外链自检）、`e2e/bench-mp4.png`、`e2e/bench-hls.png`、`e2e/load-pct.png`（加载进度确定态）、`e2e/load-indet.png`（不确定态）。
 
+### 网页铺满真机验证（MuMu + Via）
+
+桌面 Chromium 只能证明 CSS 逻辑对，证明不了「Via 的地址栏/底部栏到底还在不在」，所以这一层必须在模拟器的真实 Via 里跑。
+
+测试台：
+
+- `e2e/pagefs-android.html`：页内三个场景（普通 `<video>` / `transform` 包裹 / iframe 内播放器），
+  每个场景**先藏掉其它卡片**再开网页铺满（不隔离会被脚本挑到上一个场景的 video，量出来的全是错数），
+  逐步把 `kind / position / 宽高 / shade / 祖先 class / anc 数量` 打进页内 HUD。
+  `?hold=a|b|c` 停在某个场景的开启态，用来截图看实机画面。
+- `e2e/pagefs-player.html`：打开内置播放器 → 用真实 `click()` 点顶栏「网页铺满」→
+  输出按钮顺序、点亮态、`aria-pressed`、`requestFullscreen` 调用次数、退出胶囊是否隐藏，
+  关掉播放器后再看网页层有没有接管。
+
+结果（Via 7.3.3 / Android 15 / WebView 110，WebView 视口 **360×560**，dpr 3）：
+
+| 场景 | 开启后 | 退出后 |
+| --- | --- | --- |
+| A 普通 video | `fixed 360×560`，视频元素正好等于 WebView 视口 | `static 320×150`，遮罩/按钮残留 0 |
+| B `transform` 包裹 | `fixed 360×560`，祖先 `tf=none`、挂上 `vv-pagefs-anc` | 祖先恢复 `matrix(1,0,0,1,0,0)`，class 只剩 `tf` |
+| C iframe 内播放器 | `kind=iframe`，iframe `fixed 360×560`，**内层 video 也 `fixed 360×560`**，内层注入了样式 | iframe `static 320×150`、内层 `static`、class 清空、注入样式残留 0 |
+| 顶栏按钮（播放器内） | 按钮 `class="vv-csbtn on"`、`aria-pressed=true`，`requestFullscreen` 调用 **0 次** | 关播放器后网页层接管（`suspended=false`、`video=已接管`） |
+
+截图：`e2e/pagefs-android-hold-b.png`、`e2e/pagefs-android-hold-c.png`、`e2e/pagefs-player-android.png`。
+
+两条观感上的说明，免得被误判成 bug：
+
+1. **竖屏里 16:9 视频会上下留黑**，那是 `object-fit: contain` 的正常表现，元素本身已经是 360×560；
+   判据看 HUD 里的 `fixed 360×560`，别看黑边。
+2. **在内置播放器里点「网页铺满」不会改变布局**：播放器本来就铺满 WebView，
+   这时候它只做两件事——确保没进系统全屏、把按钮点亮。它是给「站点自己的播放器」用的，
+   想在大屏看就用顶栏那枚「沉浸全屏」。
+
+> 栏的归属再说一次：Via 的地址栏/底部工具栏由手势控制（下滑藏、上滑回），
+> 网页铺满不碰也不锁滚动。先前版本试图用 `scrollTo` 上滚几像素把它「叫回来」，
+> 真机 A/B 实测无效（`innerH` 一直停在隐藏态 616，恢复不了），已在 v0.1.50 删除。
+
+> 这轮真机还抓到一个桌面测不出的残留：退出时祖先只摘了 `vv-pagefs-anc`，把同时挂上的
+> `vv-pagefs-inner-anc` 留在了 class 里（外层没有该规则，视觉无影响但确实是脏的）。
+> 已修，并在 `pagefs-probe.mjs` 里补了「退出后祖先 class 零残留」断言。
+
 ### 真实站点实测（真实点播页）
+
 
 目标：某视频站点的点播页（剧集第 1 集，45:23）。这是国内典型的真实场景：页面自己用 MSE + `blob:` 播放，m3u8 走多 CDN 轮换，且一次吐出视频主清单 / 加密清单 / 音轨等多条清单。
 
@@ -557,15 +624,18 @@ src/
   32-share.js    外部播放器导出（.m3u / curl）与链接兼容性自检
   33-multiplayer.js 跨页面播放登记表、并行资源预算、标签页休眠（回收后台解码器）、实例重建/强制关闭
   40-menu.js     脚本菜单命令、连播页面跳转消费
+  45-pagefs.js   网页铺满（原名页面全屏）：状态机、目标选取（video/shadow/iframe/canvas）、CSS 与 shadow/iframe 内注入、退出还原、巡检
   50-boot.js     启动流程（DOM ready 后初始化）
 vendor/hls.light.min.js   构建时内联（网络不可达时自动降级为 CDN 懒加载）
 build.mjs        合并 → dist/via-video-player.user.js → node --check
-scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮 234 项断言）
+scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动 271 项断言）
 scripts/serve.mjs  E2E 静态服务器（含 mp4/m3u8 MIME 与 Range；`?noRange=1` 模拟不可跳转；`/guard/*` 强制 Referer）
 scripts/e2e-verify.mjs  无头 Chrome 真实链路验证（起服务器→嗅探→播放→seek→切档→诊断→外链自检，48 项）
 scripts/ui-verify.mjs  UI/交互层功能矩阵（真实 Touch/Mouse 事件：手势/倍速/画质/锁屏/菜单交互/进度记忆/加载进度/失败卡片，98 项）
 scripts/audio-check.mjs  声音专项回归（起播有声 / 后台交还再回来 / 关掉重开 / 历史 vol=0 自救 / 主动静音不被抢 / 站点播放器拆装 / **真实标签切换**，22 项）
-scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→bench→截图→加载进度截图）
+scripts/pagefs-verify.mjs  网页铺满真实浏览器验证（fixed 铺满视口 / 祖先 transform 清理 / 退出零残留 / 不锁页面滚动 / 不调用 requestFullscreen / 两枚全屏按钮互斥 / 360px 窄屏不溢出，41 项）
+scripts/pagefs-probe.mjs   网页铺满多布局探针（干净页 / transform / 层叠上下文 / contain:paint / shadow DOM / body transform / 站点 fixed 播放器 / canvas 解码 / 同源 iframe / 跨域 iframe，27 项）
+scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/real-site-test.mjs  注入真实站点（默认某视频站点播页）验证嗅探/播放/加载进度/seek/倍速/画质/续播
 scripts/site-matrix.mjs  多站点分发策略矩阵，逐站出「嗅探→起播→进度UI」结论
@@ -577,11 +647,13 @@ e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产�
 
 ```
 node build.mjs            # 构建并语法校验
-node scripts/smoke.mjs    # 烟雾测试（234 项）
+node scripts/smoke.mjs    # 烟雾测试（271 项）
 node scripts/e2e-verify.mjs   # 无头 Chrome 真机链路验证（需 puppeteer-core）
 node scripts/ui-verify.mjs    # UI 交互功能矩阵（98 项）
 node scripts/audio-check.mjs  # 声音专项回归（含真实标签切换，22 项）
-node scripts/test-all.mjs     # 一键跑全套（7 阶段）
+node scripts/pagefs-verify.mjs # 网页铺满真实浏览器验证（41 项）
+node scripts/pagefs-probe.mjs  # 网页铺满多布局探针（27 项）
+node scripts/test-all.mjs     # 一键跑全套（9 阶段）
 node scripts/real-site-test.mjs  # 真实站点实测（需外网）
 node scripts/serve.mjs    # 另开终端，然后浏览器打开 http://localhost:8099/e2e/
 ```

@@ -662,6 +662,8 @@ function vvForceClose() {
         try { if (VV.active && VV.active.hls) VV.active.hls.destroy(); } catch (e1) {}
         try { if (VID) { VID.pause(); VID.removeAttribute('src'); VID.load(); } } catch (e2) {}
         try { vvSetPageFreeze(false); } catch (e3) {}
+        // 网页铺满的黑底遮罩也会让人以为「页面被冻住」，逃生门一并拆掉
+        try { vvPageFsSet(false, true); } catch (ePF) {}
         try { vvResumePageMedia(); } catch (e4) {}
         try { vvStopWatchdog(); } catch (e5) {}
         try { vvStopPlayerTop(); } catch (e6) {}

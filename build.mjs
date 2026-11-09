@@ -7,7 +7,7 @@ const SRC = 'src';
 const OUT = 'dist/via-video-player.user.js';
 const VER_FILE = '.version';
 const HASH_FILE = '.tmp/build.hash';
-const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '50-boot.js'];
+const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '45-pagefs.js', '50-boot.js'];
 
 // ---- 版本号必须每次改动都变 ----
 // Via 的「更新」是按 @version 比较的，版本号不动 = 永远不更新。
@@ -72,8 +72,8 @@ const HEADER = `// ==UserScript==
 // @version      ${ver}
 // @vvbuild      ${build}
 // @author       ViaModes
-// @description  网页视频嗅探 + 全屏播放器：悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
-// @description:en  Sniff web videos and play with a Quark-style fullscreen player (gestures, speed, resume, m3u8, next-episode, download)
+// @description  网页视频嗅探 + 全屏播放器：网页铺满（把站点播放器放大到可视区）、悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
+// @description:en  Sniff web videos and play with a fullscreen player; page-fill mode enlarges the site's own player to the viewport (gestures, speed, resume, m3u8, next-episode, download)
 // @match        http://*/*
 // @match        https://*/*
 // @grant        GM_xmlhttpRequest

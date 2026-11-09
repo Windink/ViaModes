@@ -6,6 +6,8 @@ function openPlayer(item) {
     var root = vvEnsurePlayerRoot();
     vvBringToFront(root);
     VV.playerActive = true;
+    // 内置播放器自己铺满视口：若开着「网页铺满」先挂起网页那层，避免两层 fixed 打架
+    try { vvPageFsSync(); } catch (ePF) {}
     vvKeepPlayerTop();
     vvToggleBadge(false);
     vvSetPageFreeze(true);
@@ -337,12 +339,18 @@ function vvEnsurePlayerRoot() {
     // 右侧三个次要操作收进一枚玻璃胶囊：和标题分开归组，也让它们有统一的 32px 命中框
     var topActs = vvEl('div', 'vv-top-acts');
     var pipBtn = vvCsBtn('pip', 'pip', 20, '画中画');
-    var fsBtn = vvCsBtn('fs', 'fs', 20, '全屏');
+    // 两枚全屏按钮并列：fs 是系统沉浸全屏（栏会被隐藏），
+    // webfs 是网页铺满（只把站点播放器放大到可视区，不碰浏览器栏）。
+    // 互斥见 vvTryFs / vvPageFsSet。
+    var fsBtn = vvCsBtn('fs', 'fs', 20, '沉浸全屏（隐藏状态栏）');
     fsBtn.id = 'vv-fs';
+    var webFsBtn = vvCsBtn('webfs', 'webfs', 20, '网页铺满（放大到可视区）');
+    webFsBtn.id = 'vv-pagefs-btn';
     var dlTop = vvCsBtn('download', 'dl', 20, '下载');
     dlTop.addEventListener('click', function () { if (VV.active) vvDownloadItem(VV.active.item); });
     topActs.appendChild(pipBtn);
     topActs.appendChild(fsBtn);
+    topActs.appendChild(webFsBtn);
     topActs.appendChild(dlTop);
     TOPBAR.appendChild(backBtn);
     TOPBAR.appendChild(title);
@@ -438,6 +446,7 @@ function vvEnsurePlayerRoot() {
     backBtn.addEventListener('click', function () { closePlayer(); });
     pipBtn.addEventListener('click', vvTryPip);
     fsBtn.addEventListener('click', vvTryFs);
+    webFsBtn.addEventListener('click', vvTogglePageFullscreen);
     CSPLAY.addEventListener('click', vvTogglePlay);
     CBTN.addEventListener('click', vvTogglePlay);
     speedChip.addEventListener('click', function (e) { e.stopPropagation(); vvSpeedMenu(); });
@@ -458,6 +467,9 @@ function vvEnsurePlayerRoot() {
         });
     }
 
+    // 播放器 root 每次打开都重建：按钮的高亮要跟着「网页铺满」当前状态走，
+    // 否则从菜单开着网页铺满再打开播放器，新按钮会显示成未激活。
+    try { vvPageFsSyncBtn(); } catch (ePF) {}
     vvBindGestures();
     vvBindVideo();
     vvBindProgress();
@@ -1670,6 +1682,8 @@ function closePlayer() {
     try { if (vvG.progDrag) { vvG.progDrag = false; vvG.mode = 'none'; vvG.gtgt = null; } } catch (eG) {}
     VV.playerActive = false;
     VV.active = null;
+    // 播放器退场后，若「网页铺满」仍开着就把网页那层恢复回来
+    try { vvPageFsSync(); } catch (ePF) {}
     try { vvSetPageFreeze(false); } catch (ef) {}
     // 如果页面视频在进播放器前被"后台休眠"摘过 src，这里必须装回去，
     // 否则退出播放器后它就是个没有地址的空壳，只能靠关页签恢复。
@@ -1744,6 +1758,9 @@ function vvTryPip() {
 }
 
 function vvTryFs() {
+    // 两枚全屏按钮互斥：点系统沉浸全屏时静默关掉「网页铺满」。
+    // 不这么做的话 fullscreenchange 也会让位，但按钮高亮会慢一拍才跳变。
+    try { if (VV._pageFs && VV._pageFs.on) vvPageFsSet(false, true); } catch (ePF) {}
     try {
         if (document.fullscreenElement) document.exitFullscreen();
         else ROOT.requestFullscreen().then(function () {

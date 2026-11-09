@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -962,6 +962,134 @@ T.setCfg('hibernate', true);
     T.setVid(null);
     T.setActive(null);
 }
+
+// ---- 页面全屏（网页全屏 · 保留状态栏）----
+// 关键回归：绝不调用 requestFullscreen()（那会把 Via 底部状态栏一起藏掉），
+// 退出后遮罩 / 退出按钮 / 巡检定时器 / video class 必须全部清干净。
+eq('页面全屏实现已打进产物', code.indexOf('function vvPageFsSet') > 0, true);
+const pfsCode = code.slice(code.indexOf('function vvPageFsSet'), code.indexOf('function vvTogglePageFullscreen'));
+eq('页面全屏不调用系统 Fullscreen API', /requestFullscreen\s*\(/.test(pfsCode), false);
+eq('页面全屏初始关闭', T.pageFs().on, false);
+eq('开启页面全屏', T.pageFsSet(true), true);
+eq('开启后状态 on', T.pageFs().on, true);
+eq('开启后遮罩存在', T.pageFs().shade, true);
+eq('开启后退出按钮存在', T.pageFs().exit, true);
+eq('开启后巡检在跑', T.pageFs().timer, true);
+eq('开启后事件已绑定', T.pageFs().bound, true);
+eq('重复开启幂等', T.pageFsSet(true), true);
+eq('关闭页面全屏', T.pageFsSet(false), false);
+eq('退出后无遮罩', T.pageFs().shade, false);
+eq('退出后无退出按钮', T.pageFs().exit, false);
+eq('退出后巡检已停', T.pageFs().timer, false);
+eq('退出后无残留 video class', T.pageFs().video, false);
+eq('退出后无残留祖先 class', T.pageFs().anc, 0);
+eq('菜单开关可来回切', [T.pageFsToggle(), T.pageFsToggle()], [true, false]);
+
+// 内置播放器自己铺满视口：期间挂起网页层，关掉再恢复
+T.setPlayerActive(true);
+T.pageFsSet(true);
+eq('播放器打开时页面全屏挂起', T.pageFs().suspended, true);
+T.setPlayerActive(false);
+T.pageFsTick();
+eq('播放器关闭后恢复', T.pageFs().suspended, false);
+
+// 系统沉浸全屏会隐藏浏览器栏，网页铺满必须让位
+T.setFs({});
+T.pageFsTick();
+eq('系统全屏时自动让位', T.pageFs().on, false);
+T.setFs(null);
+eq('让位后无残留 DOM', T.pageFs().shade, false);
+T.pageFsSet(false, true);
+
+// 顶栏「网页铺满」按钮：图标、同步函数、开关不破坏状态
+eq('页面全屏图标已注册', !!T.icons.webfs, true);
+eq('顶栏按钮同步函数可用', typeof T.pageFsBtn, 'function');
+T.pageFsSet(true, true);
+T.pageFsBtn();
+eq('开启后同步不破坏状态', T.pageFs().on, true);
+T.pageFsSet(false, true);
+T.pageFsBtn();
+eq('关闭后同步不破坏状态', T.pageFs().on, false);
+
+// ---- 不锁滚动、不代劳滚动：浏览器栏归 Via 自己的手势管 ----
+// 真机实测：程序化 scrollTo 叫不回 Via 的栏（没有手势它不认），
+// 而 overflow:hidden 锁住页面反而让用户连上滑唤回都做不到。所以守两条：
+// 只加「铺满」状态 class（不加锁），开屏过程中一次都不滚页面。
+const realClassList = documentStub.documentElement.classList;
+const clsSet = new Set();
+documentStub.documentElement.classList = {
+    add: (c) => clsSet.add(c),
+    remove: (c) => clsSet.delete(c),
+    contains: (c) => clsSet.has(c),
+    toggle() {}
+};
+const scrollCalls = [];
+const realScrollTo = winStub.scrollTo;
+winStub.scrollTo = (x, y) => { scrollCalls.push(y); };
+documentStub.documentElement.scrollHeight = 2400;
+winStub.scrollY = 500;
+
+T.pageFsSet(true, true);
+eq('铺满只加 vv-pagefs-on', clsSet.has('vv-pagefs-on'), true);
+eq('铺满不加滚动锁', clsSet.has('vv-pagefs-lock'), false);
+eq('开屏不代劳滚动页面', scrollCalls.length, 0);
+T.pageFsSet(false, true);
+eq('退出后状态 class 摘净', clsSet.size, 0);
+
+winStub.scrollTo = realScrollTo;
+winStub.scrollY = 0;
+documentStub.documentElement.classList = realClassList;
+documentStub.documentElement.scrollHeight = undefined;
+
+// ---- 目标选取：真实站点里「主画面」不一定在顶层文档的 <video> 里 ----
+// shadow DOM / iframe / canvas 三种兜底，都对应过「点了完全没反应」的线上情况。
+winStub.innerWidth = 412;
+winStub.innerHeight = 892;
+const qfs = documentStub.querySelectorAll;
+const mkEl = (tag, w, h) => {
+    const el = elStub();
+    el.tagName = tag;
+    el.nodeType = 1;
+    el.getBoundingClientRect = () => ({ left: 0, top: 0, width: w, height: h });
+    el.closest = () => null;
+    el.getRootNode = () => documentStub;
+    return el;
+};
+const withQsa = (map, fn) => {
+    documentStub.querySelectorAll = (sel) => map[sel] || [];
+    try { fn(); } finally { documentStub.querySelectorAll = qfs; }
+};
+
+const smallVideo = mkEl('VIDEO', 100, 60);
+const bigIframe = mkEl('IFRAME', 400, 300);   // 跨域：contentDocument 读不到
+const tinyIframe = mkEl('IFRAME', 120, 90);   // 广告尺寸，不该被当成播放器
+const bigCanvas = mkEl('CANVAS', 400, 300);
+
+withQsa({ video: [smallVideo] }, () => {
+    const t = T.pageFsPick();
+    eq('目标选取：顶层 video 优先', t && t.kind, 'video');
+});
+withQsa({ video: [], iframe: [bigIframe] }, () => {
+    const t = T.pageFsPick();
+    eq('目标选取：跨域大 iframe 兜底', t && t.kind, 'iframe');
+});
+withQsa({ video: [], iframe: [tinyIframe] }, () => {
+    eq('目标选取：小 iframe 不当播放器', T.pageFsPick(), null);
+});
+withQsa({ video: [], iframe: [tinyIframe], canvas: [bigCanvas] }, () => {
+    const t = T.pageFsPick();
+    eq('目标选取：canvas 解码兜底', t && t.kind, 'canvas');
+});
+withQsa({ video: [smallVideo], iframe: [bigIframe] }, () => {
+    const t = T.pageFsPick();
+    eq('目标选取：大 iframe 压过小 video', t && t.kind, 'iframe');
+});
+withQsa({ video: [smallVideo], iframe: [bigIframe] }, () => {
+    const d = T.pageFsDiag();
+    eq('诊断：报告各类候选数量', [d.videos, d.iframes, d.canvases], [1, 1, 0]);
+    eq('诊断：报告最终目标类型', d.kind, 'iframe');
+});
+eq('诊断文案可读', typeof T.pageFsDiagnose(), 'string');
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

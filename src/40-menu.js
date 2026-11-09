@@ -2,6 +2,13 @@ function vvSetupMenu() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     try {
         GM_registerMenuCommand('嗅探结果面板', function () { vvOpenPanel(); });
+        // 「网页铺满」= 把站点自己的播放器放大到整个可视区，不进系统全屏。
+        // 它不碰 Via 的地址栏/底部工具栏（那些是 WebView 之外的系统 UI）。
+        // 播放器顶栏那枚「沉浸全屏」是另一套（会隐藏栏），两者互斥。
+        GM_registerMenuCommand('网页铺满 开/关（放大站点播放器）', vvTogglePageFullscreen);
+        // 点了没反应时先点这里：会说明页面里到底有几个 video / iframe / canvas，
+        // 以及脚本最后把哪个元素当成「主画面」，不用猜。
+        GM_registerMenuCommand('网页铺满 诊断（点了没反应时用）', vvPageFsDiagnose);
         GM_registerMenuCommand('开启/关闭嗅探（全局）', vvToggleGlobal);
         GM_registerMenuCommand('本站启用/禁用嗅探', vvToggleSite);
         GM_registerMenuCommand('默认倍速（点击切换）', vvCycleSpeed);
@@ -192,7 +199,7 @@ function vvForceRelease() {
 function vvAbout() {
     try {
         alert('Via 视频嗅探播放器 v' + VV.version +
-            '\n\n功能：视频嗅探·全屏手势播放器·倍速·进度记忆·m3u8·连播·下载' +
+            '\n\n功能：视频嗅探·网页铺满（放大站点播放器）·全屏手势播放器·倍速·进度记忆·m3u8·连播·下载' +
             '\n\n使用：嗅探角标出现后点击打开列表；▶ 播放进内置播放器。' +
             '\n\n限制：部分站点加密流（blob）无法导出；m3u8 下载需第三方工具。' +
             '\n\n作者：ViaModes · 本地运行，不上传任何数据');

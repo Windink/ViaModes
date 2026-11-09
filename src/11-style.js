@@ -121,9 +121,12 @@ var VV_CSS = `
 .vv-player-root.cs-on .vv-cs-bottom,
 .vv-player-root.cs-on .vv-center-play { opacity: 1; pointer-events: auto; }
 
-/* 顶栏右侧三个次要操作收进一枚玻璃胶囊：既归组，又不和标题抢注意力 */
+/* 顶栏右侧四个次要操作收进一枚玻璃胶囊：既归组，又不和标题抢注意力。
+   其中两枚是全屏：fs（系统沉浸全屏）/ webfs（网页铺满，仅放大站点播放器）。 */
 .vv-top-acts { display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 4px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid var(--vv-line); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .vv-top-acts .vv-csbtn { min-width: 34px; height: 32px; padding: 0 4px; border-radius: 999px; }
+/* 「网页铺满」开着时点亮这一枚；和旁边 fs 的图标切换区分开，一眼看出当前是哪种全屏 */
+.vv-top-acts .vv-csbtn.on { color: var(--vv-accent); background: var(--vv-accent-weak); }
 
 .vv-title { color: #fff; font-size: 15px; font-weight: 600; letter-spacing: .01em; line-height: 1.3; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0 6px; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
 
@@ -308,4 +311,50 @@ var VV_CSS = `
   .vv-csbtn, .vv-chip, .vv-sheet-item, .vv-prog-dot,
   .vv-prog-track, .vv-prog-buf, .vv-prog-cur, .vv-center-play { transition-duration: .001ms; }
 }
+
+/* ============================================================
+   网页铺满（原名「页面全屏」）
+   只在网页内部铺满 WebView 视口，不调用 requestFullscreen()。
+   浏览器栏是 WebView 之外的系统 UI，本样式一概不碰；栏显示与否由
+   Via 自己的「下滑隐藏 / 上滑显示」决定，所以我们也不锁页面滚动。
+   与播放器顶栏那枚「沉浸全屏」（系统全屏）是两套独立模式。
+   层级：遮罩 2147483000 < 铺满画面 2147483001 < 脚本 UI 2147483647，
+   角标 / 嗅探面板 / 退出按钮在铺满时依然可点。
+   ============================================================ */
+.vv-pagefs-shade, .vv-pagefs-exit { all: initial; }
+.vv-pagefs-shade { display: none !important; position: fixed !important; left: 0 !important; top: 0 !important;
+  width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  background: #000 !important; opacity: 1 !important; transform: none !important;
+  pointer-events: none !important; z-index: 2147483000 !important; }
+.vv-pagefs-shade.on { display: block !important; }
+/* 只给目标 video 挂 class，不写 inline style、不搬 DOM：
+   MSE/blob 流一旦脱离原节点就会黑屏，退出时摘 class 即可零残留。 */
+html.vv-pagefs-on .vv-pagefs-video { position: fixed !important; left: 0 !important; top: 0 !important;
+  width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+  max-width: none !important; max-height: none !important; min-width: 0 !important; min-height: 0 !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important;
+  object-fit: contain !important; background: #000 !important; transform: none !important;
+  z-index: 2147483001 !important; }
+/* position:fixed 会被祖先的 transform/filter 变成相对该祖先定位，
+   这是「全屏后视频还缩在原来那一小块」的元凶；只清非默认值的祖先。 */
+html.vv-pagefs-on .vv-pagefs-anc { transform: none !important; -webkit-transform: none !important;
+  filter: none !important; -webkit-filter: none !important; perspective: none !important;
+  will-change: auto !important; contain: none !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+/* 放在右上：Via 的底部状态栏/工具栏在网页之外，右上角永远不会被它压住。 */
+.vv-pagefs-exit { display: flex !important; align-items: center !important; justify-content: center !important;
+  position: fixed !important; right: 12px !important; top: calc(env(safe-area-inset-top, 0px) + 12px) !important;
+  box-sizing: border-box !important; height: 34px !important; padding: 0 11px !important; gap: 6px !important;
+  border: 1px solid rgba(255,255,255,.20) !important; border-radius: 17px !important;
+  background: rgba(18,19,26,.72) !important; color: #e9eaee !important;
+  font: 12px/1 system-ui, -apple-system, sans-serif !important; white-space: nowrap !important;
+  appearance: none !important; -webkit-appearance: none !important; cursor: pointer !important;
+  backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;
+  box-shadow: 0 4px 18px rgba(0,0,0,.42) !important; z-index: 2147483647 !important;
+  -webkit-tap-highlight-color: transparent !important; }
+.vv-pagefs-exit:active { background: rgba(48,50,62,.90) !important; }
+/* 内置播放器顶栏已有同一枚按钮时，网页层不必再叠一个出口 */
+.vv-pagefs-exit.hide { display: none !important; }
+.vv-pagefs-exit svg { width: 15px !important; height: 15px !important; flex: none !important; }
 `;

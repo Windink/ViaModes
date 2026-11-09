@@ -2,6 +2,7 @@ function vvMain() {
     try {
         vvEnsureStyle();
         vvSetupMenu();
+        vvPageFsSetup();
         vvSetupLifecycle();
         vvConsumeAutoNext();
         setTimeout(vvvSyncBadge, 900);
@@ -21,6 +22,16 @@ function vvMain() {
                 openPanel: vvOpenPanel,
                 closePanel: function () { try { if (vvUI && vvUI.panel) vvUI.panel.close(); } catch (e) {} },
                 badge: vvToggleBadge,
+                // 网页铺满（原名页面全屏）：现场状态与手动开关
+                pageFs: vvPageFsState,
+                pageFsSet: vvPageFsSet,
+                pageFsToggle: vvTogglePageFullscreen,
+                pageFsVideo: vvPageFsVideo,
+                pageFsPick: vvPageFsPick,
+                pageFsDiag: vvPageFsDiag,
+                pageFsDiagnose: vvPageFsDiagnose,
+                pageFsTick: vvPageFsTick,
+                pageFsBtn: vvPageFsSyncBtn,
                 shareProbe: vvShareProbe,
                 buildM3U: vvBuildM3U,
                 buildCmd: vvBuildCmd,

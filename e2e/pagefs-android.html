@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>页面全屏真机验证</title>
+<style>
+  html, body { margin: 0; background: #f5f5f7; color: #222; font: 15px/1.5 system-ui, sans-serif; }
+  header { padding: 10px 12px; background: #fff; border-bottom: 1px solid #e5e5e5; }
+  header b { font-size: 15px; }
+  header span { display: block; font-size: 12px; color: #888; }
+  .card { margin: 10px 12px; background: #fff; border-radius: 8px; padding: 8px; }
+  .card h3 { margin: 0 0 6px; font-size: 13px; color: #666; font-weight: 600; }
+  .box { width: 100%; height: 150px; background: #000; overflow: hidden; border-radius: 6px; }
+  .box video, .box iframe { width: 100%; height: 100%; border: 0; display: block; background: #000; }
+  .tf { transform: translateZ(0); }
+  /* 真机上的 HUD：层级压到脚本 UI 之上，截图里能直接读数 */
+  #hud { position: fixed; left: 8px; top: calc(env(safe-area-inset-top, 0px) + 8px); z-index: 2147483647;
+         background: rgba(0,0,0,.86); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+         padding: 7px 9px; border-radius: 8px; white-space: pre-wrap; word-break: break-all;
+         max-width: 92vw; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <b>页面全屏 · 真机验证</b>
+  <span id="sub">等待脚本就绪…</span>
+</header>
+
+<div class="card" id="card-a">
+  <h3>场景 A：普通 video</h3>
+  <div class="box"><video id="va" muted playsinline preload="auto" src="/e2e/flower.mp4"></video></div>
+</div>
+
+<div class="card" id="card-b">
+  <h3>场景 B：transform 包裹（真实站点的播放器外层）</h3>
+  <div class="box"><div class="tf" id="wb" style="width:100%;height:100%">
+    <video id="vb" muted playsinline preload="auto" src="/e2e/flower.mp4" style="width:100%;height:100%"></video>
+  </div></div>
+</div>
+
+<div class="card" id="card-c">
+  <h3>场景 C：iframe 内的播放器（同源）</h3>
+  <div class="box"><iframe id="fc" srcdoc="<body style='margin:0;background:#000'><video id='vc' muted playsinline preload='auto' src='/e2e/flower.mp4' style='width:100%;height:100%'></video></body>"></iframe></div>
+</div>
+
+<div id="hud">启动中…</div>
+
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+    var hud = document.getElementById('hud');
+    var sub = document.getElementById('sub');
+    var lines = [];
+    function log(s) {
+        lines.push(s);
+        hud.textContent = lines.slice(-9).join('\n');
+        console.log('VVPAGEFS|' + s);
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function rect(el) {
+        try { var r = el.getBoundingClientRect(); return Math.round(r.width) + 'x' + Math.round(r.height); }
+        catch (e) { return 'n/a'; }
+    }
+    function pos(el) {
+        try { return getComputedStyle(el).position; } catch (e) { return 'n/a'; }
+    }
+
+    function report(tag, el, kind) {
+        var st = window.__vv.pageFs();
+        var cls = document.querySelectorAll('.vv-pagefs-video');
+        var c0 = cls[0];
+        log(tag + ' :: vp ' + innerWidth + 'x' + innerHeight +
+            ' | kind=' + (st.kind || '-') +
+            ' | 目标 ' + (c0 ? c0.tagName + ' ' + pos(c0) + ' ' + rect(c0) : '无') +
+            ' | 测点 ' + pos(el) + ' ' + rect(el) +
+            ' | shade=' + (st.shade ? 1 : 0) +
+            ' | html=' + (document.documentElement.classList.contains('vv-pagefs-on') ? 1 : 0) +
+            ' | anc=' + st.anc);
+    }
+
+    // 每个场景单独跑：把其它卡片藏掉，避免脚本挑到上一个场景的 video
+    function only(id) {
+        ['card-a', 'card-b', 'card-c'].forEach(function (x) {
+            var el = document.getElementById(x);
+            if (el) el.style.display = (x === id ? '' : 'none');
+        });
+    }
+
+    async function run() {
+        sub.textContent = '脚本已就绪，逐场景验证…';
+        log('env :: inner ' + innerWidth + 'x' + innerHeight + ' dpr ' + (window.devicePixelRatio || 1) +
+            ' screen ' + screen.width + 'x' + screen.height);
+
+        var va = document.getElementById('va');
+        var vb = document.getElementById('vb');
+
+        // A：普通 video
+        only('card-a');
+        try { await va.play(); } catch (e) {}
+        await wait(200);
+        window.__vv.pageFsSet(true, true);
+        await wait(300);
+        report('A 普通', va);
+        window.__vv.pageFsSet(false, true);
+        await wait(250);
+        log('A 退出后 :: ' + pos(va) + ' ' + rect(va) + ' | 残留 ' +
+            document.querySelectorAll('#vv-pagefs-shade,#vv-pagefs-exit').length);
+
+        // B：transform 包裹
+        only('card-b');
+        try { await vb.play(); } catch (e) {}
+        await wait(200);
+        window.__vv.pageFsSet(true, true);
+        await wait(300);
+        report('B transform', vb);
+        log('B 祖先 :: #wb.class="' + document.getElementById('wb').className + '" tf=' +
+            getComputedStyle(document.getElementById('wb')).transform);
+        window.__vv.pageFsSet(false, true);
+        await wait(250);
+        log('B 退出后 :: ' + pos(vb) + ' ' + rect(vb) + ' | #wb.class="' +
+            document.getElementById('wb').className + '" tf=' +
+            getComputedStyle(document.getElementById('wb')).transform);
+
+        // C：iframe 内的播放器
+        only('card-c');
+        await wait(300);
+        window.__vv.pageFsSet(true, true);
+        await wait(500);
+        var f = document.getElementById('fc');
+        var vc = null;
+        try { vc = f.contentDocument && f.contentDocument.getElementById('vc'); } catch (e) {}
+        var stc = window.__vv.pageFs();
+        log('C iframe :: kind=' + stc.kind + ' | iframe ' + pos(f) + ' ' + rect(f) +
+            ' | 内层 ' + (vc ? pos(vc) + ' ' + rect(vc) : '读不到 contentDocument'));
+        log('C 注入 :: ' + (f.contentDocument && f.contentDocument.getElementById('vv-pagefs-inner-style') ? '有样式' : '无样式'));
+        window.__vv.pageFsSet(false, true);
+        await wait(250);
+        log('C 退出后 :: iframe ' + pos(f) + ' ' + rect(f) + ' | 内层 ' +
+            (vc ? pos(vc) + ' | class="' + vc.className + '"' : 'n/a') +
+            ' | 注入残留 ' + (f.contentDocument && f.contentDocument.getElementById('vv-pagefs-inner-style') ? 1 : 0));
+
+        // 汇总
+        only('');
+        window.__vv.pageFsSet(false, true);
+        sub.textContent = '四轮跑完，下面是要点（也可截图给我）';
+        log('DONE :: 三个场景跑完');
+
+        // ?hold=a|b|c：停在某个场景的「页面全屏」状态，方便截图看实机效果
+        var hold = (/[?&]hold=([abc])/.exec(location.search) || [])[1];
+        if (hold) {
+            var ids = { a: 'card-a', b: 'card-b', c: 'card-c' };
+            only(ids[hold]);
+            await wait(200);
+            window.__vv.pageFsSet(true, true);
+            await wait(500);
+            var st = window.__vv.pageFs();
+            log('HOLD ' + hold.toUpperCase() + ' :: kind=' + st.kind + ' | vp ' + innerWidth + 'x' + innerHeight);
+        }
+    }
+
+    var tries = 0;
+    var t = setInterval(function () {
+        if (window.__vv && window.__vv.pageFs && window.__vv.pageFsSet) {
+            clearInterval(t);
+            setTimeout(function () { run().catch(function (e) { log('ERR :: ' + (e && e.message || e)); }); }, 500);
+        } else if (++tries > 100) {
+            clearInterval(t);
+            log('ERR :: __vv 未挂载（?vvdebug=1 是否带上了）');
+        }
+    }, 100);
+})();
+</script>
+</body>
+</html>
