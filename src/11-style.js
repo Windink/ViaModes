@@ -298,6 +298,21 @@ var VV_CSS = `
 .vv-sheet-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vv-sheet-sub { margin-top: 3px; font-size: 11px; font-weight: 400; color: var(--vv-t3); }
 .vv-sheet-check { display: flex; flex: 0 0 auto; color: var(--vv-accent); }
+
+/* ---- 播放态低特效（默认开，见 vvSyncLowFx / vvToggleLowFx）----
+   真机 MuMu + Via 7.3.3 / WebView 110 实测：视频在播时展开更多菜单，
+   半屏 .vv-sheet 的 blur(20px) 要跟着每帧重采样，平均帧间隔 16.7 → 22.34ms、
+   P95 16.67 → 41.66ms、>25ms 长帧率 0.21% → 29.87%。关掉模糊后回到稳定 60fps。
+   所以播放层默认改用更实的背景代替毛玻璃；顶栏那枚 8px 小胶囊面积太小，保留。
+   想恢复毛玻璃：更多 → 设置 →「界面毛玻璃」，或脚本菜单里的同类开关。 */
+.vv-player-root.vv-lowfx .vv-sheet,
+.vv-player-root.vv-lowfx .vv-loading,
+.vv-player-root.vv-lowfx .vv-err {
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+}
+.vv-player-root.vv-lowfx .vv-sheet { background: rgba(18,19,26,.96); }
+.vv-player-root.vv-lowfx .vv-loading,
+.vv-player-root.vv-lowfx .vv-err { background: rgba(18,19,26,.94); }
 .vv-switch { position: relative; flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; background: rgba(255,255,255,.16); transition: background .18s var(--vv-ease); }
 .vv-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .18s var(--vv-ease); }
 .vv-sheet-item.on .vv-switch { background: var(--vv-accent); }

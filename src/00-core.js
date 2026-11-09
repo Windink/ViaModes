@@ -62,12 +62,15 @@ var VV = {
         autoplayNext: vvGet('autoplayNext', false),
         // auto = 有 MSE 用 hls.js；native = 优先系统 HLS；hlsjs = 强制 hls.js
         hlsEngine: vvGet('hlsEngine', 'auto'),
-        // 多页并行播放：开启后多个页面可同时播（缓冲与清晰度自动压缩），关闭则只允许一个
+        // 多页并行播放：开启后多个页面可同时播（只压缩缓冲/内存，不压画质），关闭则只允许一个
         multiPlay: vvGet('multiPlay', false),
         // 标签页休眠：页面切到后台时摘掉原生 <video> 的 src，真正释放 MediaCodec
         hibernate: vvGet('hibernate', true),
         // 选集：从播放器里点某一集跳到该页后，自动接着播这一集的视频
-        epAutoPlay: vvGet('epAutoPlay', true)
+        epAutoPlay: vvGet('epAutoPlay', true),
+        // 播放态低特效：关掉菜单/加载框的大面积 backdrop-filter。真机实测半屏 blur(20px)
+        // 会把平均帧间隔从 16.7ms 拉到 22.3ms、长帧率从 0.2% 拉到 29.9%，默认开（省电）。
+        lowFx: vvGet('lowFx', true)
     }
 };
 

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>播放态模糊层 · Via 真机帧率探针</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  video { width: 180px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>播放态模糊层帧率探针（Via 真机）</h1>
+<p>内置播放器 + 更多菜单展开：lowfx 用产品默认（已关大面积模糊），glass 强制把 blur(20px) 加回来，对比 rAF 帧间隔。既复现毛玻璃的掉帧，也验证默认低特效确实拉回 60fps。三个场景都保持控制栏可见，页面自动采样并上报。</p>
+<video preload="metadata" src="/e2e/flower.mp4"></video>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    // Via 重启会恢复旧标签，旧页面也会上报；驱动只认本轮标识
+    var RUN = (/perf-play-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var MS = 4000, ROUNDS = 2;
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function hudText(s) { hud.textContent = s; }
+
+    // ---- rAF 采样器：整个页面周期内只装一条链，按窗口重置 ----
+    var pb = { gaps: [], last: 0, until: 0 };
+    function beat(t) {
+        if (pb.last && t <= pb.until && pb.gaps.length < 4000) pb.gaps.push(+(t - pb.last).toFixed(2));
+        pb.last = t;
+        requestAnimationFrame(beat);
+    }
+    requestAnimationFrame(beat);
+    function reset(ms) {
+        pb.gaps.length = 0;
+        pb.last = 0;
+        pb.until = performance.now() + ms;
+    }
+    function report() {
+        var g = pb.gaps.slice().sort(function (x, y) { return x - y; });
+        var sum = 0, slow = 0;
+        for (var i = 0; i < g.length; i++) { sum += g[i]; if (g[i] > 25) slow++; }
+        return {
+            frames: g.length,
+            avgGap: g.length ? +(sum / g.length).toFixed(2) : 0,
+            p95Gap: g.length ? g[Math.min(g.length - 1, Math.floor(g.length * 0.95))] : 0,
+            // 60Hz 下 16.7ms 一帧，>25ms 说明至少跳过一帧
+            slowRate: g.length ? +(slow / g.length * 100).toFixed(2) : 0
+        };
+    }
+
+    // 底层持续运动的像素：真机视频本身在动，这里再垫一个只走 transform 的渐变，
+    // 保证模糊层下方每帧都有变化（与桌面 perf-playback.mjs 同构，便于对照）。
+    function installMotion() {
+        var st = document.createElement('style');
+        st.textContent = '#pb-motion-layer{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden}' +
+            '#pb-motion-layer::after{content:"";position:absolute;left:-15%;top:18%;width:55%;height:64%;' +
+            'background:radial-gradient(circle,rgba(90,160,255,.5),transparent 70%);' +
+            'animation:pbMove 1.1s linear infinite alternate}' +
+            '@keyframes pbMove{from{transform:translateX(0)}to{transform:translateX(190%)}}';
+        document.documentElement.appendChild(st);
+        var root = document.getElementById('vv-player-root');
+        if (root) { var d = document.createElement('div'); d.id = 'pb-motion-layer'; root.appendChild(d); }
+        // 控制栏 3s 自动收起；三个场景都钉住，变量只剩「菜单 + 模糊」
+        setInterval(function () {
+            var r = document.getElementById('vv-player-root');
+            if (r) r.classList.add('cs-on');
+        }, 800);
+    }
+
+    function prepare(mode) {
+        // 产品默认已是低特效，这里反向把毛玻璃强制加回来，才能量出它的净代价
+        var st = document.getElementById('pb-glass');
+        if (mode === 'glass') {
+            if (!st) {
+                st = document.createElement('style');
+                st.id = 'pb-glass';
+                // 产品规则是 .vv-player-root.vv-lowfx .vv-sheet + !important，
+                // 重复一个 class 顶高优先级，否则强制毛玻璃压不过默认低特效
+                st.textContent = '.vv-player-root.vv-lowfx .vv-sheet.vv-sheet{' +
+                    'backdrop-filter:blur(20px)!important;' +
+                    '-webkit-backdrop-filter:blur(20px)!important}';
+                document.documentElement.appendChild(st);
+            }
+        } else if (st) st.parentNode.removeChild(st);
+
+        var sheet = document.getElementById('vv-sheet');
+        if (mode === 'base') {
+            if (sheet) { sheet.classList.remove('open'); sheet.innerHTML = ''; }
+        } else {
+            var btn = document.querySelector('.vv-player-root [data-act="more"]');
+            if (sheet && !sheet.classList.contains('open') && btn) btn.click();
+        }
+        var s = document.getElementById('vv-sheet');
+        var cs = s ? getComputedStyle(s) : null;
+        var v = document.querySelector('.vv-player-video');
+        return {
+            menuOpen: !!(s && s.classList.contains('open')),
+            items: s ? s.querySelectorAll('.vv-sheet-item').length : 0,
+            sheetH: s ? Math.round(s.getBoundingClientRect().height) : 0,
+            blur: cs ? (cs.backdropFilter || cs.webkitBackdropFilter || '') : '',
+            webkitBlur: cs ? (cs.webkitBackdropFilter || '') : '',
+            playing: !!(v && !v.paused && v.readyState >= 2),
+            t: v ? +v.currentTime.toFixed(2) : -1
+        };
+    }
+
+    async function untilReady() {
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.VV) return window.__vv;
+            await wait(200);
+        }
+        return null;
+    }
+
+    async function main() {
+        var vv = await untilReady();
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        send({ tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            ua: navigator.userAgent.slice(0, 120), vw: innerWidth, vh: innerHeight,
+            dpr: devicePixelRatio });
+        if (!vv) { send({ tag: 'done', scenes: 0, err: 'no __vv' }); return; }
+
+        var item = { url: location.origin + '/e2e/flower.mp4', name: '真机帧率测试视频',
+            type: 'MP4', source: 'test' };
+        try { vv.open(item); } catch (e) { send({ tag: 'envErr', msg: String(e) }); }
+        await wait(1800);
+        var v = document.querySelector('.vv-player-video');
+        if (v) { v.loop = true; v.currentTime = 0.5; try { v.play(); } catch (e) {} }
+        installMotion();
+        await wait(600);
+
+        var count = 0;
+        for (var round = 0; round < ROUNDS; round++) {
+            // 轮换顺序，抵消预热/缓存带来的系统性偏差
+            var order = round % 2 === 0 ? ['base', 'glass', 'lowfx'] : ['lowfx', 'glass', 'base'];
+            for (var j = 0; j < order.length; j++) {
+                var mode = order[j];
+                var pre = prepare(mode);
+                hudText('第 ' + (round + 1) + ' 轮 · ' + mode + ' · 采样中');
+                send({ tag: 'pre', round: round, mode: mode, pre: pre });
+                await wait(500); // 展开动画与样式重算落地，别算进采样窗口
+                reset(MS);
+                await wait(MS);
+                var r = report();
+                r.tag = 'scene'; r.round = round; r.mode = mode; r.pre = pre;
+                send(r);
+                count++;
+                hudText('第 ' + (round + 1) + ' 轮 · ' + mode + ' · ' + r.frames + ' 帧 / P95 ' + r.p95Gap + 'ms');
+                await wait(150);
+            }
+        }
+        send({ tag: 'done', scenes: count });
+    }
+    main().catch(function (e) { send({ tag: 'done', scenes: 0, err: String(e && e.message || e) }); });
+})();
+</script>
+<!-- 不在这里加载 dist：真机测试台依赖 Via 已安装的用户脚本注入，
+     页面自己再引一份会重复执行，而且页面脚本上下文没有 GM API。 -->
+</body>
+</html>

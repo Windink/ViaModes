@@ -51,6 +51,9 @@ function vvMain() {
                 mini: vvMiniWindow,
                 pip: vvTryPip,
                 hasPriorityOverlay: vvHasPriorityOverlay,
+                // 播放态低特效：只读状态与手动切换，供真机帧率探针复验
+                lowFxSync: vvSyncLowFx,
+                lowFxToggle: vvToggleLowFx,
                 leaseWrite: function (id, ts) {
                     try {
                         if (!ts) { localStorage.removeItem(VV_LEASE_PREFIX + id); return; }

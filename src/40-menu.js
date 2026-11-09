@@ -17,6 +17,7 @@ function vvSetupMenu() {
         GM_registerMenuCommand('多页并行播放（当前：' + (VV.cfg.multiPlay ? '开' : '关') + '）', vvToggleMultiPlay);
         GM_registerMenuCommand('后台释放解码器 / 标签页休眠（当前：' + (VV.cfg.hibernate ? '开' : '关') + '）', vvToggleHibernate);
         GM_registerMenuCommand('选集跳页后自动播放（当前：' + (VV.cfg.epAutoPlay ? '开' : '关') + '）', vvToggleEpAutoPlay);
+        GM_registerMenuCommand('播放界面毛玻璃（当前：' + (VV.cfg.lowFx ? '关·省电' : '开') + '）', vvToggleLowFx);
         GM_registerMenuCommand('强制关闭播放器（页面卡死时用）', vvForceClose);
         GM_registerMenuCommand('资源释放自检（退出后卡顿/不释放时用）', vvReleaseAudit);
         GM_registerMenuCommand('本页让出解码器（其它页面要用）', vvForceRelease);
@@ -79,6 +80,18 @@ function vvToggleEpAutoPlay() {
     vvToast(VV.cfg.epAutoPlay
         ? '选集跳页后会自动播放那一集'
         : '选集跳页后只打开页面，不自动播放', true);
+}
+
+// 播放态低特效：配置项要立刻同步到播放器根层，否则改了设置得等下次开播放器才生效。
+// 真机实测半屏 blur(20px) 让菜单展开时的长帧率从 0.2% 涨到 29.9%，所以默认关毛玻璃；
+// 这个开关给想保留观感的用户留一条退路。
+function vvToggleLowFx() {
+    VV.cfg.lowFx = !VV.cfg.lowFx;
+    vvSet('lowFx', VV.cfg.lowFx);
+    try { vvSyncLowFx(); } catch (e) {}
+    vvToast(VV.cfg.lowFx
+        ? '已开启播放界面省电：菜单与加载框不再做毛玻璃，播放更稳'
+        : '已恢复毛玻璃：观感更好，低端设备展开菜单时可能掉帧', true);
 }
 
 function vvSelfCheck() {

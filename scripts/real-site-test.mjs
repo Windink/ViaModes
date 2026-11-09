@@ -383,7 +383,8 @@ try {
         const sheet = document.getElementById('vv-sheet');
         let rows = sheet ? sheet.querySelectorAll('.vv-sheet-item') : [];
         let qIdx = -1, qText = '';
-        for (let i = 0; i < rows.length; i++) if (/画质/.test(rows[i].textContent)) { qIdx = i; qText = rows[i].textContent.trim(); break; }
+        // 锚定行首 label：功能项说明里出现「画质」二字时不会误点错菜单
+        for (let i = 0; i < rows.length; i++) if (/^\s*画质[:：]/.test(rows[i].textContent)) { qIdx = i; qText = rows[i].textContent.trim(); break; }
         if (qIdx < 0) return { skip: true, reason: '菜单里没有画质项' };
         rows[qIdx].click();
         await new Promise((r2) => setTimeout(r2, 350));

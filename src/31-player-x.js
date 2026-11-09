@@ -37,11 +37,11 @@ function vvSeekTo(t, silent) {
                 // 把进度条恢复到真实位置，避免停在拖动预览处
                 try {
                     var cur = VID.currentTime || 0;
-                    if (CSTIME) CSTIME.innerHTML = vvFmtTime(cur);
+                    vvSetCurTime(cur);
                     if (d > 0 && CSCUR) {
                         var pct = Math.min(100, (cur / d) * 100);
-                        CSCUR.style.width = pct + '%';
-                        CSPROGDOT.style.left = pct + '%';
+                        vvSetBarPct(CSCUR, 'width', pct);
+                        vvSetBarPct(CSPROGDOT, 'left', pct);
                     }
                 } catch (eU) {}
                 return;
@@ -891,7 +891,7 @@ function vvDiagText() {
         } else if (loadingSec > 6) {
             verdict = '有分片已等 ' + loadingSec.toFixed(0) + 's 未返回：源太慢，或正在硬等';
         } else if (dropPct >= 2) {
-            verdict = 'WebView 软解超载：网络够快但丢帧 ' + dropPct.toFixed(1) + '%，要限码率';
+            verdict = 'WebView 软解超载：网络够快但丢帧 ' + dropPct.toFixed(1) + '%，先关界面毛玻璃 / 减少并行页签，画质不必降';
         } else if (ahead < 2 && loadPct >= 60) {
             verdict = '策略偏紧：缓冲只剩 ' + ahead.toFixed(1) + 's，负载 ' + Math.round(loadPct) + '% 已到临界';
         } else if (loadPct >= 60) {
@@ -1028,7 +1028,7 @@ function vvMenuSheet() {
     // 布尔项改用开关控件：状态由控件本身表达，不再往标题里拼「：开/关」
     items.push({
         label: '多页并行播放',
-        sub: '同时播多个页面时自动压低档位与缓冲',
+        sub: '同时播多个页面时只压缩缓冲与内存，码率档位不变',
         switch: true,
         on: !!VV.cfg.multiPlay,
         act: function () {
@@ -1044,6 +1044,17 @@ function vvMenuSheet() {
             VV.cfg.autoplayNext = !VV.cfg.autoplayNext;
             vvSet('autoplayNext', VV.cfg.autoplayNext);
             vvToast('连播已' + (VV.cfg.autoplayNext ? '开启' : '关闭'));
+            return false;
+        }
+    });
+    // 开关语义是「开 = 有毛玻璃」，配置项是「开 = 低特效」，这里取反
+    items.push({
+        label: '界面毛玻璃',
+        sub: '关掉后播放时菜单不再每帧模糊重算，低性能设备更稳',
+        switch: true,
+        on: !VV.cfg.lowFx,
+        act: function () {
+            vvToggleLowFx();
             return false;
         }
     });

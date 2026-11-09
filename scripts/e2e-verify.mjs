@@ -360,7 +360,7 @@ try {
     ok('别的页面在播时本页自动挂起', leaseTest.suspended && leaseTest.paused, JSON.stringify(leaseTest));
     ok('对方退出后本页自动恢复', leaseTest.resumed, JSON.stringify(leaseTest));
 
-    // ---- 并行模式：允许多页同时播，并按并发数压缩缓冲与清晰度 ----
+    // ---- 并行模式：允许多页同时播，只压缩缓冲/内存，画质档位保持不封顶 ----
     const parallel = await page.evaluate(async () => {
         window.__vv.multiPlay();               // 打开并行模式
         window.__vv.leaseWrite('peer-1', Date.now());
@@ -383,9 +383,9 @@ try {
     ok('并行模式下不挂起本页', parallel.suspended === false, JSON.stringify(parallel));
     ok('并发 2 时缓冲压缩到 20s', parallel.buf === 20, JSON.stringify(parallel));
     ok('并发 2 时字节上限压缩到 24MB', parallel.bufSize === 24000000, JSON.stringify(parallel));
-    ok('并发 2 时限制清晰度上限', parallel.cap >= 0 && parallel.levels > 1, JSON.stringify(parallel));
+    ok('并发 2 时画质不封顶', parallel.cap === -1 && parallel.levels > 1, JSON.stringify(parallel));
     ok('只剩一页后缓冲恢复 36s', parallel.bufAfter === 36, JSON.stringify(parallel));
-    ok('只剩一页后解除清晰度限制', parallel.capAfter === -1, JSON.stringify(parallel));
+    ok('只剩一页后画质仍不封顶', parallel.capAfter === -1, JSON.stringify(parallel));
 
     // ---- 重建实例：实例坏掉后可原地重建，不需要重启浏览器 ----
     const rebuild = await page.evaluate(async () => {

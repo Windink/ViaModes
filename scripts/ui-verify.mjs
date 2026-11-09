@@ -533,9 +533,10 @@ try {
         await new Promise((r2) => setTimeout(r2, 250));
         const sheet = document.getElementById('vv-sheet');
         let rows = sheet ? sheet.querySelectorAll('.vv-sheet-item') : [];
-        // 找到「画质：xxx」那一项并点开它
+        // 找到「画质：xxx」那一项并点开它。必须锚定行首的 label：
+        // 别的功能项说明文案里也可能出现「画质」二字，宽松匹配会点错菜单。
         let qIdx = -1;
-        for (let i = 0; i < rows.length; i++) if (/画质/.test(rows[i].textContent)) { qIdx = i; break; }
+        for (let i = 0; i < rows.length; i++) if (/^\s*画质[:：]/.test(rows[i].textContent)) { qIdx = i; break; }
         if (qIdx < 0) return { labels: [], noQuality: true };
         const qLabel = rows[qIdx].textContent;
         rows[qIdx].click();
@@ -560,7 +561,7 @@ try {
             cur: inst ? inst.currentLevel : -1
         };
     });
-    ok('更多菜单里有「画质」项', /画质/.test(quality.qLabel || ''), quality.qLabel);
+    ok('更多菜单里有「画质」项', /^\s*画质[:：]/.test(quality.qLabel || ''), quality.qLabel);
     ok('画质菜单列出档位', (quality.labels || []).some((l) => /\d+P/.test(l)), (quality.labels || []).join(' | '));
     ok('画质菜单含「自动」', (quality.labels || []).some((l) => /自动/.test(l)), (quality.labels || []).join(' | '));
     ok('选档后切到手动模式', quality.auto === false && quality.manual >= 0,

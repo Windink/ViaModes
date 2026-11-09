@@ -258,7 +258,37 @@ var ROOT = null, VID = null, BRIGHT = null, TOPBAR = null, BOTBAR = null, CBTN =
     CSPLAY = null, CSTIME = null, CSPROG = null, CSBUF = null, CSCUR = null,
     CSPROGDOT = null, LOCKMARK = null, SEEKTIP = null, GESTIP = null,
     LOADING = null, LOADBAR = null, LOADFILL = null, ERRBOX = null,
-    MINIBAR = null, MINIDRAG = null;
+    MINIBAR = null, MINIDRAG = null,
+    // 时长元素与当前秒文案缓存：timeupdate 约 4Hz，原来每次都 getElementById('vv-dur')
+    // 并用 innerHTML 重建文本节点；文案按秒变化，缓存后绝大多数回调可以直接跳过。
+    DUREL = null, LAST_CUR_TXT = '';
+
+// 播放态低特效：开关只落在播放器根层的 class 上，CSS 一律按这个 class 匹配。
+// 换源/重建 ROOT 时会在 vvEnsurePlayerRoot 里重新同步，避免改了设置却不生效。
+function vvSyncLowFx() {
+    try {
+        if (!ROOT) return;
+        if (VV.cfg.lowFx) ROOT.classList.add('vv-lowfx');
+        else ROOT.classList.remove('vv-lowfx');
+    } catch (e) {}
+}
+
+function vvSetCurTime(cur) {
+    if (!CSTIME) return;
+    var s = vvFmtTime(cur === undefined ? (VID ? VID.currentTime : 0) : cur);
+    if (s === LAST_CUR_TXT) return;
+    LAST_CUR_TXT = s;
+    CSTIME.textContent = s;
+}
+
+// 百分比量化到 0.1%：360px 屏上一步不到 0.5px，肉眼无差，但长视频里能省掉
+// 绝大多数无意义的 style 写入。比较的是 inline 值而不是内存缓存，所以拖动预览、
+// seek 等别处直接写的 width 不会和这里的缓存打架。
+function vvSetBarPct(el, prop, pct) {
+    if (!el) return;
+    var s = (Math.round(pct * 10) / 10) + '%';
+    if (el.style[prop] !== s) el.style[prop] = s;
+}
 
 
 // 环形进度周长（r=19 → 2πr ≈ 119.38）
@@ -279,10 +309,15 @@ function vvCsBtn(act, icon, size, label, cls) {
 }
 
 function vvEnsurePlayerRoot() {
-    if (ROOT) { try { document.documentElement.appendChild(ROOT); } catch (e) {} return ROOT; }
+    if (ROOT) {
+        try { document.documentElement.appendChild(ROOT); } catch (e) {}
+        vvSyncLowFx();
+        return ROOT;
+    }
     vvEnsureStyle();
     ROOT = vvEl('div', 'vv-player-root');
     ROOT.id = 'vv-player-root';
+    vvSyncLowFx();
     VID = vvEl('video', 'vv-player-video');
     VID.setAttribute('playsinline', '');
     VID.setAttribute('webkit-playsinline', '');
@@ -392,6 +427,7 @@ function vvEnsurePlayerRoot() {
     CSPROGDOT = CSPROG.querySelector('.vv-prog-dot');
     var durEl = vvEl('div', 'vv-time', '00:00');
     durEl.id = 'vv-dur';
+    DUREL = durEl;
     progRow.appendChild(CSTIME);
     progRow.appendChild(CSPROG);
     progRow.appendChild(durEl);
@@ -693,11 +729,12 @@ function vvCodecRescue(why) {
         try { pos = (VID && isFinite(VID.currentTime) && VID.currentTime > 0) ? VID.currentTime : 0; } catch (eP) {}
         if (!pos) pos = act._suspendT || 0;
         act._suspendT = pos;
+        // 只作诊断标记（诊断面板显示重试次数），不再据此把 ABR 钉在最低档
         act._forceLow = true;
         VV._lastRescue = { ts: Date.now(), why: why || '', n: act._rescue };
-        vvToast(act._rescue === 1 ? '没能拿到硬件解码器，正在让出资源并降档重试…'
+        vvToast(act._rescue === 1 ? '没能拿到硬件解码器，正在让出资源并重建…'
             : act._rescue === 2 ? '再试一次（其它页面正在归还解码器）…'
-                : '最后一次尝试（已降到最低清晰度）…', true);
+                : '最后一次尝试（画质保持不变）…', true);
         // 1) 广播：请其它页签把解码器交出来
         try { vvRequestPeerRelease(); } catch (e0) {}
         // 2) 本页全交：hls / 播放器 <video> / 站点自带的 MSE 播放器
@@ -917,13 +954,20 @@ function vvHlsSetSeekMode(inst, on) {
 
 // hls.js 移动端参数：参考官方 API 的 loadPolicy / gap controller 建议。
 // 目标：弱网起播快、seek 遇到小缓冲空洞不卡死、断流后从当前位置恢复。
+// 画质红线：不做任何自动降档。掉帧 / 小窗 / 并行 / 解码器重试都只能改缓冲与 UI，
+// 不能改码率档位；要降画质只能由用户在「画质」菜单里手动选。
 function vvHlsConfig() {
     return {
         enableWorker: true,
         lowLatencyMode: false,
-        capLevelToPlayerSize: true,
-        capLevelOnFPSDrop: true,
-        startLevel: 0,
+        // 不按播放器 DOM 尺寸封顶：手机 WebView 里播放器常被 CSS 缩到 360×203，
+        // 按它封顶会把 720P/1080P 档直接排除，且网页铺满 / 系统全屏后尺寸还会变。
+        capLevelToPlayerSize: false,
+        // 不因掉帧降档：UI 毛玻璃引起的合成掉帧跟视频解码无关，
+        // 以前这会让画面在打开菜单时悄悄变糊；掉帧改由 lowFx 在 UI 层解决。
+        capLevelOnFPSDrop: false,
+        // -1 = 交给 ABR 自动选档（配合 2Mbps 起估），不再硬钉最低档起播。
+        startLevel: -1,
         startFragPrefetch: true,
         testBandwidth: false,
         abrBandWidthUpFactor: 0.6,
@@ -1069,10 +1113,8 @@ function vvLoadMedia(item) {
                         VV.active._hlsRetried = false;
                         var ls = inst.levels || [];
                         if (ls.length > 1) vvBuildQualityMenu(ls, inst);
-                        // 解码器吃紧过：直接钉在最省的一档，别让 ABR 又爬回 1080P
-                        if (VV.active && VV.active._forceLow && ls.length) {
-                            try { inst.autoLevelCapping = 0; } catch (eL0) {}
-                        }
+                        // 画质红线：解码器重试过也不设 autoLevelCapping，
+                        // 让 ABR 按带宽自己选档；要降档由用户在画质菜单手动选。
                         var ats = inst.audioTracks || [];
                         VV.active.hlsInst = inst;
                         VV.active.audioTracks = ats;
@@ -1441,7 +1483,7 @@ function vvBindVideo() {
                 try { if (VV.active.hls) VV.active.hls.startLoad(skipT); } catch (eS) {}
                 vvToast('已跳过片头');
             }
-            try { document.getElementById('vv-dur').innerHTML = vvFmtTime(VID.duration); } catch (eD) {}
+            try { if (DUREL) DUREL.textContent = vvFmtTime(VID.duration); } catch (eD) {}
             try { VID.playbackRate = VV.active.speed || 1; } catch (eR) {}
             VID.play().catch(function () {});
         } catch (e) {}
@@ -1592,14 +1634,13 @@ function vvOnTime() {
         // 直播：没有总长概念，进度条按比例算会一直是 0% 或 100% 乱跳，
         // 直接把进度条整条点亮 + 时长位写「直播」，并且禁掉拖动/横滑快进（见 31-player-x.js）。
         var live = vvIsLive();
-        if (CSTIME) CSTIME.innerHTML = vvFmtTime(cur);
+        // 文案按秒变化，缓存后同秒内的重复 timeupdate 不再重建文本节点
+        vvSetCurTime(cur);
         if (live) {
-            // 每帧都校正一次文案：hls.js 在拿到直播窗口后会把 duration 从 Infinity 变成有限值，
+            // 仍要每次校正：hls.js 拿到直播窗口后会把 duration 从 Infinity 变成有限值，
             // 那次 durationchange 会带着 loadedmetadata 再写一遍时长位，只写一次会被覆盖回去。
-            try {
-                var durEl = document.getElementById('vv-dur');
-                if (durEl && durEl.innerHTML !== '直播') durEl.innerHTML = '直播';
-            } catch (eDL) {}
+            // 但只在文案真的不同时才动 DOM，元素引用也不再每轮查一次。
+            try { if (DUREL && DUREL.textContent !== '直播') DUREL.textContent = '直播'; } catch (eDL) {}
             if (VV.active._durTxt !== '直播') {
                 VV.active._durTxt = '直播';
                 // 直播没有"下一集"，把连播按钮收起来（页面里常能嗅到一堆频道链接，会被误判成剧集）
@@ -1608,18 +1649,18 @@ function vvOnTime() {
                     if (nb) nb.style.display = 'none';
                 } catch (eNB1) {}
             }
-            if (CSCUR) CSCUR.style.width = '100%';
-            if (CSPROGDOT) CSPROGDOT.style.left = '100%';
-            if (CSBUF) CSBUF.style.width = '100%';
+            vvSetBarPct(CSCUR, 'width', 100);
+            vvSetBarPct(CSPROGDOT, 'left', 100);
+            vvSetBarPct(CSBUF, 'width', 100);
         } else if (dur > 0 && CSCUR && !(typeof vvG === 'object' && vvG && vvG.progDrag)) {
             var pct = Math.min(100, (cur / dur) * 100);
-            CSCUR.style.width = pct + '%';
-            CSPROGDOT.style.left = pct + '%';
+            vvSetBarPct(CSCUR, 'width', pct);
+            vvSetBarPct(CSPROGDOT, 'left', pct);
         }
         try {
             if (VID.buffered && VID.buffered.length > 0 && dur > 0 && !live) {
                 var bEnd = VID.buffered.end(VID.buffered.length - 1);
-                CSBUF.style.width = Math.min(100, (bEnd / dur) * 100) + '%';
+                vvSetBarPct(CSBUF, 'width', Math.min(100, (bEnd / dur) * 100));
             }
         } catch (eB) {}
         var now = Date.now();
@@ -1787,7 +1828,7 @@ function closePlayer() {
     MINIBAR = null;
     CSPLAY = null; CSTIME = null; CSPROG = null; CSBUF = null; CSCUR = null; CSPROGDOT = null;
     LOCKMARK = null; SEEKTIP = null; GESTIP = null; LOADING = null; LOADBAR = null; LOADFILL = null;
-    ERRBOX = null;
+    ERRBOX = null; DUREL = null; LAST_CUR_TXT = '';
     vvStopLoadTick();
     if (VV.items.length) vvToggleBadge(true);
 }

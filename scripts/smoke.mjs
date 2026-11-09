@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -279,6 +279,10 @@ eq('hls back buffer', hcfg.backBufferLength, 20);
 eq('hls abr estimate', hcfg.abrEwmaDefaultEstimate, 2000000);
 eq('hls manifest ttf', hcfg.manifestLoadPolicy.default.maxTimeToFirstByteMs, 12000);
 eq('hls prefetch', hcfg.startFragPrefetch, true);
+// 画质红线：脚本不做任何主动降档，档位只由 ABR 按带宽和用户手选决定
+eq('hls 不按播放器尺寸封顶', hcfg.capLevelToPlayerSize, false);
+eq('hls 不因掉帧降档', hcfg.capLevelOnFPSDrop, false);
+eq('hls 起播交给 ABR 自动选档', hcfg.startLevel, -1);
 
 // seek 模式：放宽超时保证跳转不被中途放弃，回到播放再收紧
 const hinst = { config: T.hlsConfig() };
@@ -773,7 +777,7 @@ T.setCfg('hibernate', true);
     delete sandbox.GM_getValue;
 }
 
-// 解码器自救：最多两次，且第二次起钉在最低清晰度
+// 解码器自救：最多三次，且只重建管线、不再把 ABR 钉在最低档
 {
     const rv = fakeVideo('https://cdn.a.com/x.mp4', 5);
     T.setVid(rv);
@@ -786,7 +790,7 @@ T.setCfg('hibernate', true);
     // 三次而不是两次：别的页签从"失去焦点"到真正归还 MediaCodec 要几秒，
     // 只试两次（间隔 0.9s）会在解码器还没空出来时就把页面判死。
     eq('自救最多三次', [r1, r2, r3, r4], [true, true, true, false]);
-    eq('自救会钉最低清晰度', T.VV.active._forceLow, true);
+    eq('自救保留诊断标记（不再据此压画质）', T.VV.active._forceLow, true);
     eq('自救会记时间戳', typeof T.VV._lastRescue.ts, 'number');
     T.setPlayerActive(false);
     T.setActive(null);
@@ -1221,6 +1225,67 @@ documentStub.getElementById = geOrig;
 T.setMini(true);
 eq('面板避让：页内小窗时停手', T.hasPriorityOverlay(), true);
 T.setMini(false);
+
+// ===== 播放态低特效（默认关毛玻璃）与 timeupdate 的 DOM 写入节流 =====
+eq('低特效：默认开启', T.cfg().lowFx, true);
+const lfSet = new Set();
+const lfRoot = {
+    style: {},
+    classList: {
+        add(x) { lfSet.add(x); }, remove(x) { lfSet.delete(x); }, contains(x) { return lfSet.has(x); }
+    }
+};
+T.setRoot(lfRoot);
+T.lowFxSync();
+eq('低特效：开启时根层挂上 vv-lowfx', lfRoot.classList.contains('vv-lowfx'), true);
+T.lowFxToggle();
+eq('低特效：切换后配置为关', T.cfg().lowFx, false);
+eq('低特效：切换后 class 立刻摘掉（不用等下次开播放器）', lfRoot.classList.contains('vv-lowfx'), false);
+eq('低特效：配置已持久化', JSON.parse(sandbox.localStorage.getItem('via.vp.lowFx')), false);
+T.lowFxToggle();
+eq('低特效：切回后配置与 class 都恢复',
+    T.cfg().lowFx === true && lfRoot.classList.contains('vv-lowfx'), true);
+
+// 当前时间文案：按秒缓存，同秒内多次 timeupdate 不再重建文本节点
+let curWrites = 0, curVal = '';
+const curEl = {
+    get textContent() { return curVal; },
+    set textContent(v) { curWrites++; curVal = v; }
+};
+T.setCurTimeEl(curEl);
+T.setCurTime(1.2);
+eq('时间文案：首秒写入 00:01', curEl.textContent, '00:01');
+eq('时间文案：首秒只写一次 DOM', curWrites, 1);
+T.setCurTime(1.4);
+T.setCurTime(1.9);
+eq('时间文案：同秒内重复回调不写 DOM', curWrites, 1);
+T.setCurTime(2.1);
+eq('时间文案：跨秒才更新', curEl.textContent, '00:02');
+eq('时间文案：跨秒后累计写两次', curWrites, 2);
+T.setCurTime(3661.5);
+eq('时间文案：小时格式不受缓存影响', curEl.textContent, '1:01:01');
+
+// 进度条：量化到 0.1%（360px 屏上一步 <0.5px），且相同值不重复写 inline style
+let barWrites = 0;
+const barStyle = {};
+const bar = { style: new Proxy(barStyle, {
+    set(t, k, v) { barWrites++; t[k] = v; return true; }
+}) };
+T.setBarPct(bar, 'width', 33.333);
+eq('进度条：量化到 0.1%', barStyle.width, '33.3%');
+eq('进度条：首次写一次', barWrites, 1);
+T.setBarPct(bar, 'width', 33.34);
+T.setBarPct(bar, 'width', 33.349);
+eq('进度条：不足 0.1% 的变化跳过写入', barWrites, 1);
+T.setBarPct(bar, 'width', 33.5);
+eq('进度条：跨过量化步长才写', barStyle.width, '33.5%');
+eq('进度条：累计写两次', barWrites, 2);
+T.setBarPct(bar, 'width', 100);
+eq('进度条：直播 100% 边界', barStyle.width, '100%');
+T.setBarPct(bar, 'width', 0);
+eq('进度条：0% 边界', barStyle.width, '0%');
+T.setBarPct(null, 'width', 50);
+eq('进度条：元素为空不抛错', true, true);
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

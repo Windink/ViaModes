@@ -3,8 +3,8 @@
 // 用户明确要求"同时播几个"，所以这里不能简单锁死单实例，改为：
 //   1. 登记表（谁在播），跨页面共享
 //   2. 单实例模式（默认）：只有最早的页面在播，其余自动挂起 —— 防解码器耗尽
-//   3. 并行模式（可开）：允许多页同时播，但按并发数自动压缩每页的缓冲与分辨率，
-//      把"多个解码器"的压力降到能撑住的范围内
+//   3. 并行模式（可开）：允许多页同时播，但按并发数压缩每页的缓冲与内存上限，
+//      把"多个解码器"的压力降到能撑住的范围内；画质档位一律不压（画质红线）
 // 两种模式都保留了：挂起后释放解码器、实例重建、强制关闭逃生门。
 
 var VV_LEASE_TTL = 9000;    // 登记表里超过 9 秒没续的条目视为已退出
@@ -534,9 +534,10 @@ function vvPeerReleaseSeen() {
     } catch (e1) {}
 }
 
-// 并行预算：并发页数越多，每页分到的缓冲和分辨率越少。
-// 解码器的占用跟分辨率强相关（1080P 一路大约是 360P 的 6~8 倍），
-// 并行时主动压档，是"能同时播几个"的关键，而不是让 ABR 随机撞墙。
+// 并行预算：并发页数越多，每页分到的缓冲与内存越少。
+// 画质红线：只压缓冲与内存，不动清晰度档位——分辨率由源和 ABR 决定，
+// 真要省资源由用户在画质菜单手动选低档，脚本不擅自降画质。
+// 多解码器并发的兜底是默认的单实例模式，而不是压画质。
 function vvApplyParallelBudget(count) {
     try {
         var inst = VV.active && VV.active.hls;
@@ -548,32 +549,13 @@ function vvApplyParallelBudget(count) {
         if (cfg.maxMaxBufferLength !== ml * 2) cfg.maxMaxBufferLength = ml * 2;
         if (cfg.maxBufferSize !== ms) cfg.maxBufferSize = ms;
 
-        // 并行时给清晰度设上限，避免多个高分辨率解码器把池撑爆
+        // 画质红线：保持 autoLevelCapping = -1（不封顶）。
+        // 以前并行 2/3 页会把档位压到 ≤480P / ≤360P，用户要的原画质直接没了；
+        // 并发解码器压力交给默认单实例模式与上面的缓冲预算消化。
+        // 用户手选档位走 nextLevel，与 capping 互不干扰，这里不碰。
         try {
-            var levels = inst.levels || [];
-            var cap = -1;
-            if (count >= 2 && levels.length) {
-                var targetH = count >= 3 ? 360 : 480;
-                var best = -1, bestH = Infinity;
-                for (var i = 0; i < levels.length; i++) {
-                    var h = (levels[i] && levels[i].height) || 0;
-                    if (h && h <= targetH && h < bestH) { bestH = h; best = i; }
-                }
-                if (best < 0) {
-                    bestH = Infinity;
-                    for (var j = 0; j < levels.length; j++) {
-                        var hh = (levels[j] && levels[j].height) || Infinity;
-                        if (hh < bestH) { bestH = hh; best = j; }
-                    }
-                }
-                cap = best;
-            }
-            if (inst.autoLevelCapping !== cap) inst.autoLevelCapping = cap;
+            if (inst.autoLevelCapping !== -1) inst.autoLevelCapping = -1;
         } catch (e2) {}
-        // 解码器吃紧过的页面：无论并行几路，都钉在最省的那一档
-        if (VV.active && VV.active._forceLow) {
-            try { if (inst.autoLevelCapping !== 0) inst.autoLevelCapping = 0; } catch (e3) {}
-        }
     } catch (e) {}
 }
 
@@ -683,7 +665,7 @@ function vvToggleMultiPlay() {
     VV.cfg.multiPlay = !VV.cfg.multiPlay;
     vvSet('multiPlay', VV.cfg.multiPlay);
     if (VV.cfg.multiPlay) {
-        vvToast('已开启多页并行播放：多个页面可同时播放，缓冲与清晰度会自动压缩', true);
+        vvToast('已开启多页并行播放：多个页面可同时播放，只压缩缓冲与内存，画质不变', true);
         try { if (VV.active) vvApplyParallelBudget(vvPlayersCount()); } catch (e) {}
     } else {
         vvToast('已关闭并行播放：同一时间只允许一个页面播放（防解码器耗尽）', true);
