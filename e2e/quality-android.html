@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>画质红线 · Via 真机验证</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top:0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>画质红线真机验证（Via + WebView 110）</h1>
+<p>不牺牲原画质：验证 hls.js 不再按播放器尺寸封顶、不再因掉帧降码率、起播交 ABR 自动选档，
+且单实例下 autoLevelCapping 恒为 -1（唯一降档入口是用户在画质菜单手选）。
+先读配置函数返回值，再打开一个多档 HLS 读运行时实例配置与选档。</p>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    // Via 重启会恢复旧标签，旧页面也会上报；驱动只认本轮标识
+    var RUN = (/\quality-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    // 多档公开测试流：有网则真能解析出多档并验证 ABR 选档不被压制；
+    // 无网时 hls 引擎（已内联）仍会创建实例，配置字段与 autoLevelCapping 依然可读。
+    var HLS = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+
+    function untilReady() {
+        return new Promise(function (resolve) {
+            var n = 0;
+            (function tick() {
+                if (window.__vv && window.__vv.VV) return resolve(window.__vv);
+                if (++n > 120) return resolve(null);
+                setTimeout(tick, 200);
+            })();
+        });
+    }
+
+    async function main() {
+        var vv = await untilReady();
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        send({ tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            ua: navigator.userAgent.slice(0, 140), vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio });
+        if (!vv) { send({ tag: 'done', err: 'no __vv' }); return; }
+
+        // ---- 1) 配置函数源：直接证明 vvHlsConfig() 的画质字段已改 ----
+        var fn = vv.hlsConfig ? vv.hlsConfig() : null;
+        send({ tag: 'cfgFn', has: !!fn,
+            capSize: fn && fn.capLevelToPlayerSize,
+            capFps: fn && fn.capLevelOnFPSDrop,
+            start: fn && fn.startLevel });
+
+        // ---- 2) 打开多档 HLS，读运行时实例 ----
+        var item = { url: HLS, name: '画质验证多档流', type: 'HLS', source: 'test' };
+        try { vv.open(item); } catch (e) { send({ tag: 'openErr', msg: String(e) }); }
+        hud.textContent = '已打开 HLS，等待解析…';
+
+        var act, inst, parsed = false;
+        for (var i = 0; i < 80; i++) {
+            await wait(500);
+            // 触播放以驱动 hls 缓冲与 ABR 选档，才能读到真实解码分辨率
+            var v = document.querySelector('.vv-player-video') || document.querySelector('video');
+            if (v && v.paused) { try { v.play(); } catch (e) {} }
+            act = vv.VV.active;
+            inst = act && (act.hls || act.hlsInst);
+            if (inst && inst.levels && inst.levels.length) { parsed = true; break; }
+        }
+        if (parsed) await wait(4000); // 让 ABR 选档 + 首帧解码，再读真实分辨率
+        act = vv.VV.active;
+        inst = act && (act.hls || act.hlsInst);
+        var hc = inst ? inst.config : null;
+        var lv0 = (inst && inst.levels && inst.levels[0]) || {};
+        // 真实解码分辨率：证明 ABR 按带宽选的档确实落到视频元素上（而非被脚本钉死最低档）
+        var vid = document.querySelector('.vv-player-video') || document.querySelector('video');
+        var vh = vid ? (vid.videoHeight || 0) : 0;
+        send({ tag: 'cfgInst',
+            hasHls: !!inst,
+            capSize: hc && hc.capLevelToPlayerSize,
+            capFps: hc && hc.capLevelOnFPSDrop,
+            start: hc && hc.startLevel,
+            autoCap: inst ? inst.autoLevelCapping : -99,
+            autoEnabled: inst ? inst.autoLevelEnabled : null,
+            levels: inst && inst.levels ? inst.levels.length : -1,
+            cur: inst ? inst.currentLevel : -99,
+            next: inst ? inst.nextLevel : -99,
+            lv0H: lv0.height || 0,
+            vh: vh,
+            parsed: parsed,
+            http: act ? (act._lastHttpCode || 0) : 0 });
+        hud.textContent = 'hasHls=' + (!!inst) + ' levels=' +
+            ((inst && inst.levels) ? inst.levels.length : 0) + ' autoCap=' +
+            (inst ? inst.autoLevelCapping : -99);
+        send({ tag: 'done' });
+    }
+    main().catch(function (e) { send({ tag: 'done', err: String(e && e.message || e) }); });
+})();
+</script>
+<!-- 不在这里加载 dist：依赖 Via 已安装的用户脚本注入，页面自己引一份会重复执行。 -->
+</body>
+</html>

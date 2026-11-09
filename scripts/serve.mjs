@@ -65,6 +65,8 @@ http.createServer(async (req, res) => {
     if (/^\/e2e\/pip-share-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/pip-share-android.html';
     // 播放态模糊层帧率探针同理
     if (/^\/e2e\/perf-play-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/perf-play-android.html';
+    // 画质红线真机验证台同理
+    if (/^\/e2e\/quality-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/quality-android.html';
     if (/^\/e2e\/vendor\/hls-[A-Za-z0-9._-]+\.js$/.test(pathname)) pathname = '/e2e/vendor/hls.min.js';
     // 防盗链测试端点：没有 Referer 一律 403，用来验证"外链自检"能识别出防盗链
     if (pathname === '/guard/stream.m3u8') {
