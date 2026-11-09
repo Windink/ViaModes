@@ -65,14 +65,40 @@ if (bumped) {
 try { await writeFile(HASH_FILE, hash + '\n', 'utf8'); } catch (e) {}
 
 // ---- 变更记录必须跟着版本走 ----
-// 约定：每次改动源码，先把要点写进 CHANGELOG.md 的「未发布」段。
-// 只要「未发布」有内容、且当前版本在 CHANGELOG 里还没条目，就自动定版为
-// `## v当前版本 — 日期` 并补一个空的「未发布」段。
+// 约定：每次改动（含只改文档 / 注释 / 测试）先把要点写进 CHANGELOG.md 的「未发布」段。
+// 只要「未发布」有内容、且当前版本还没被任何条目覆盖，就自动定版并补一个空的「未发布」段。
+//
+// 允许「几个版本写成一条」：条目可以是单版本 `## v0.1.53 — 日期`，
+// 也可以是区间 `## v0.1.53–v0.1.55 — 日期`（区间内的版本都算已记录）。
+// 定版时会自己算起点：从「已记录的最高版本 + 1」到当前版本，跳了几版就写成区间，
+// 所以中间那些过渡版本不用单独成条。
+//
 // 定版条件不看「本次构建版本有没有自增」，这样「先 build 后补记」的时序也能自愈；
-// 若「未发布」为空且当前版本无条目，则一直报警，直到补上为止。
+// 若「未发布」为空且当前版本未被覆盖，则一直报警，直到补上为止。
 // 只提醒不阻断：中间构建（调试期间的连续 build）不该被卡住。
 const CHANGELOG = 'CHANGELOG.md';
 const CHANGELOG_HEAD = '## 未发布';
+
+const parseVer = (s) => String(s).split('.').map(Number);
+const cmpVer = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+// 标题两种写法：`## v0.1.53 — 日期`、`## v0.1.53–v0.1.55 — 日期`
+const TITLE_RE = /^## v(\d+\.\d+\.\d+)(?:\s*(?:[–—~-]|至)\s*v?(\d+\.\d+\.\d+))?/gm;
+
+function loggedRanges(txt) {
+    const out = [];
+    TITLE_RE.lastIndex = 0;
+    let m;
+    while ((m = TITLE_RE.exec(txt)) !== null) {
+        out.push([parseVer(m[1]), parseVer(m[2] || m[1])]);
+    }
+    return out;
+}
+
+// 当前版本是否已被某条记录覆盖（单版本精确匹配，或落在区间内）
+function isCovered(txt) {
+    const cur = parseVer(ver);
+    return loggedRanges(txt).some(([lo, hi]) => cmpVer(cur, lo) >= 0 && cmpVer(cur, hi) <= 0);
+}
 
 async function syncChangelog() {
     let txt = '';
@@ -81,11 +107,8 @@ async function syncChangelog() {
         return;
     }
 
-    const hasVersion = (t) =>
-        new RegExp('^## v' + ver.replace(/\./g, '\\.') + '(?:\\s|$)', 'm').test(t);
-
-    // 第一步：当前版本还没有条目，就把「未发布」段定版上去
-    if (!hasVersion(txt)) {
+    // 第一步：当前版本未被覆盖，就把「未发布」段定版上去
+    if (!isCovered(txt)) {
         const headAt = txt.indexOf(CHANGELOG_HEAD);
         if (headAt < 0) {
             console.log('\n  !!! CHANGELOG.md 里找不到「' + CHANGELOG_HEAD + '」段，无法自动定版。\n');
@@ -100,23 +123,36 @@ async function syncChangelog() {
             .filter((l) => l.trim() && !/^###\s/.test(l.trim()))
             .join('').trim();
         if (meaningful) {
+            // 起点 = 已记录的最高版本 + 1；跨了几版就写成区间，避免中间版号也要单独成条
+            const ranges = loggedRanges(txt);
+            const cur = parseVer(ver);
+            let start = ver;
+            if (ranges.length) {
+                let hi = ranges[0][1];
+                for (const r of ranges) if (cmpVer(r[1], hi) > 0) hi = r[1];
+                // 只在同一 minor 下推算，跨 minor 时保守地只记当前版本
+                if (hi[0] === cur[0] && hi[1] === cur[1] && hi[2] + 1 < cur[2]) {
+                    start = `${cur[0]}.${cur[1]}.${hi[2] + 1}`;
+                }
+            }
+            const title = start === ver ? `## v${ver}` : `## v${start}–v${ver}`;
             const date = new Date().toISOString().slice(0, 10);
             txt = txt.slice(0, headAt)
                 + CHANGELOG_HEAD + '\n\n'
-                + `## v${ver} — ${date}\n\n`
+                + `${title} — ${date}\n\n`
                 + sectionRaw.trim() + '\n\n'
                 + tailRaw.replace(/^\n+/, '');
             await writeFile(CHANGELOG, txt, 'utf8');
-            console.log('changelog -> v' + ver, '(' + date + ')');
+            console.log('changelog -> ' + title.slice(3), '(' + date + ')');
         }
     }
 
-    // 第二步：校验当前版本确实留下了条目。定版成功会通过；漏记则每次都提醒。
-    if (!hasVersion(txt)) {
+    // 第二步：校验当前版本确实被某条记录覆盖。定版成功会通过；漏记则每次都提醒。
+    if (!isCovered(txt)) {
         console.log('');
-        console.log('  !!! CHANGELOG 漏记 !!! 当前版本是 v' + ver + '，但 CHANGELOG.md 里没有它的条目。');
-        console.log('  请到「' + CHANGELOG_HEAD + '」段补上这一版改了什么（写清原因，不要只写「优化」「修复」），');
-        console.log('  再重新 build，条目会自动定版为 v' + ver + '。');
+        console.log('  !!! CHANGELOG 漏记 !!! 当前版本是 v' + ver + '，但没有任何条目覆盖到它。');
+        console.log('  请到「' + CHANGELOG_HEAD + '」段补上这几版改了什么（写清原因，不要只写「优化」「修复」），');
+        console.log('  再重新 build；跨了几个版本会自动合并成 `## v起始–v' + ver + '`。');
         console.log('');
     }
 }
