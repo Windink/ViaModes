@@ -628,6 +628,7 @@ src/
   50-boot.js     启动流程（DOM ready 后初始化）
 vendor/hls.light.min.js   构建时内联（网络不可达时自动降级为 CDN 懒加载）
 build.mjs        合并 → dist/via-video-player.user.js → node --check
+CHANGELOG.md     逐版本变更记录（「未发布」段由 build.mjs 自动定版）
 scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动 271 项断言）
 scripts/serve.mjs  E2E 静态服务器（含 mp4/m3u8 MIME 与 Range；`?noRange=1` 模拟不可跳转；`/guard/*` 强制 Referer）
 scripts/e2e-verify.mjs  无头 Chrome 真实链路验证（起服务器→嗅探→播放→seek→切档→诊断→外链自检，48 项）
@@ -657,6 +658,11 @@ node scripts/test-all.mjs     # 一键跑全套（9 阶段）
 node scripts/real-site-test.mjs  # 真实站点实测（需外网）
 node scripts/serve.mjs    # 另开终端，然后浏览器打开 http://localhost:8099/e2e/
 ```
+
+每次改动都要在 `CHANGELOG.md` 的「未发布」段写清「改了什么、为什么改」（只改文档、注释、测试也算），
+然后跑 `node build.mjs`：它会按产物哈希自增 `@version`，并把「未发布」段自动定版为
+`## v新版本 — 日期`、补一个空的「未发布」段。漏记时构建会打印 `!!! CHANGELOG 漏记 !!!`，
+而且每次构建都提醒，直到补上为止（只提醒不阻断，中间构建不会被卡住）。
 
 真机（需 adb 连接、Via 已放开弹窗拦截）：
 

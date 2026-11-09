@@ -53,7 +53,8 @@ let ver = '0.1.3';
 try { ver = (await readFile(VER_FILE, 'utf8')).trim() || ver; } catch (e) {}
 let prevHash = '';
 try { prevHash = (await readFile(HASH_FILE, 'utf8')).trim(); } catch (e) {}
-if (prevHash !== hash) {
+const bumped = prevHash !== hash;
+if (bumped) {
     const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(ver);
     ver = m ? `${m[1]}.${m[2]}.${Number(m[3]) + 1}` : '0.1.4';
     await writeFile(VER_FILE, ver + '\n', 'utf8');
@@ -62,6 +63,65 @@ if (prevHash !== hash) {
     console.log('version stays', ver, '(no source change)');
 }
 try { await writeFile(HASH_FILE, hash + '\n', 'utf8'); } catch (e) {}
+
+// ---- 变更记录必须跟着版本走 ----
+// 约定：每次改动源码，先把要点写进 CHANGELOG.md 的「未发布」段。
+// 只要「未发布」有内容、且当前版本在 CHANGELOG 里还没条目，就自动定版为
+// `## v当前版本 — 日期` 并补一个空的「未发布」段。
+// 定版条件不看「本次构建版本有没有自增」，这样「先 build 后补记」的时序也能自愈；
+// 若「未发布」为空且当前版本无条目，则一直报警，直到补上为止。
+// 只提醒不阻断：中间构建（调试期间的连续 build）不该被卡住。
+const CHANGELOG = 'CHANGELOG.md';
+const CHANGELOG_HEAD = '## 未发布';
+
+async function syncChangelog() {
+    let txt = '';
+    try { txt = await readFile(CHANGELOG, 'utf8'); } catch (e) {
+        console.log('\n  !!! 找不到 CHANGELOG.md，本次改动没有任何版本记录。\n');
+        return;
+    }
+
+    const hasVersion = (t) =>
+        new RegExp('^## v' + ver.replace(/\./g, '\\.') + '(?:\\s|$)', 'm').test(t);
+
+    // 第一步：当前版本还没有条目，就把「未发布」段定版上去
+    if (!hasVersion(txt)) {
+        const headAt = txt.indexOf(CHANGELOG_HEAD);
+        if (headAt < 0) {
+            console.log('\n  !!! CHANGELOG.md 里找不到「' + CHANGELOG_HEAD + '」段，无法自动定版。\n');
+            return;
+        }
+        const rest = txt.slice(headAt + CHANGELOG_HEAD.length);
+        const nextIdx = rest.search(/\n## /);
+        const sectionRaw = nextIdx < 0 ? rest : rest.slice(0, nextIdx);
+        const tailRaw = nextIdx < 0 ? '' : rest.slice(nextIdx);
+        // 只算真实条目：去掉空行与 `### 新增` 这类小标题后还有没有字
+        const meaningful = sectionRaw.split('\n')
+            .filter((l) => l.trim() && !/^###\s/.test(l.trim()))
+            .join('').trim();
+        if (meaningful) {
+            const date = new Date().toISOString().slice(0, 10);
+            txt = txt.slice(0, headAt)
+                + CHANGELOG_HEAD + '\n\n'
+                + `## v${ver} — ${date}\n\n`
+                + sectionRaw.trim() + '\n\n'
+                + tailRaw.replace(/^\n+/, '');
+            await writeFile(CHANGELOG, txt, 'utf8');
+            console.log('changelog -> v' + ver, '(' + date + ')');
+        }
+    }
+
+    // 第二步：校验当前版本确实留下了条目。定版成功会通过；漏记则每次都提醒。
+    if (!hasVersion(txt)) {
+        console.log('');
+        console.log('  !!! CHANGELOG 漏记 !!! 当前版本是 v' + ver + '，但 CHANGELOG.md 里没有它的条目。');
+        console.log('  请到「' + CHANGELOG_HEAD + '」段补上这一版改了什么（写清原因，不要只写「优化」「修复」），');
+        console.log('  再重新 build，条目会自动定版为 v' + ver + '。');
+        console.log('');
+    }
+}
+
+await syncChangelog();
 
 const build = new Date().toISOString().replace('T', ' ').slice(0, 16);
 
