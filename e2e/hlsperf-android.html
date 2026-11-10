@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>hls.js 内联执行成本 · Via 真机量化</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top:0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  pre { font: 10px/1.5 ui-monospace, monospace; background: #fff; border: 1px solid #ddd;
+      border-radius: 6px; padding: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="hud">测量中…</div>
+<h1>hls.js 内联执行成本 · 真机量化</h1>
+<p>问题：vendor 里 386KB 的 hls.js 以 IIFE 形式在 document-start 直接执行，等于每个页面都完整
+解析编译一遍，而绝大多数页面并不播 m3u8。曾按需编译过一次（c34207d）又整体回退（c384204）。
+这里只量数字：同一份源码在这台设备的 WebView 里「编译+执行」到底要多少毫秒，
+以及页面首屏脚本整体耗时多少——用来判断值不值得再引入按需编译的复杂度。</p>
+
+<script>
+// 这段必须是页面里第一个执行的页面脚本：Via 的用户脚本在 document-start 同步跑完，
+// 所以这里的 performance.now() 已经包含了「整份 dist（含 vendor）执行完」的时间。
+window.__tPageStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var RUN = (/\hlsperf-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    var SRC_URL = '/vendor/hls.light.min.js';
+    var ROUNDS = 5;
+
+    // 把 vendor 源码当普通脚本执行：与 dist 里 '(function(){try{<vendor>}catch(e){}})()'
+    // 是同一件事（解析 → 预编译 → 执行顶层）。用 new Function 是为了能在页面里重复计时。
+    function execOnce(src) {
+        var fn = new Function('module', 'define', 'exports', src);
+        fn.call(window, undefined, undefined, undefined);
+    }
+
+    async function main() {
+        // 静置一下再量：页面解析、样式计算、上一轮残留的 GC 都会和首轮执行抢 CPU，
+        // 直接量出来的冷轮会漂到 80ms+ 而无法复现。
+        await wait(400);
+        var res = await fetch(SRC_URL, { cache: 'no-store' });
+        var src = await res.text();
+        var netMs = 0;
+        try {
+            var ent = performance.getEntriesByName(location.origin + SRC_URL)[0];
+            if (ent) netMs = Math.round(ent.duration);
+        } catch (e) {}
+
+        // 每轮前后都要确认真的执行了（window.Hls 被换掉），否则计时没有意义
+        var dts = [], prevVer = '';
+        for (var i = 0; i < ROUNDS; i++) {
+            try { delete window.Hls; } catch (eD) { window.Hls = undefined; }
+            var t0 = performance.now();
+            execOnce(src);
+            var dt = performance.now() - t0;
+            var h = window.Hls;
+            dts.push(+(dt.toFixed(1)));
+            if (h && h.version) prevVer = h.version;
+            hud.textContent = '第 ' + (i + 1) + '/' + ROUNDS + ' 轮 ' + dt.toFixed(1) + 'ms  ·  Hls=' + (h ? h.version : 'none');
+            await wait(60);
+        }
+
+        // 「只建函数不执行」= 按需编译方案在非 HLS 页面上真正要付的钱（V8 只做预解析）
+        var compMs = [];
+        for (var j = 0; j < 3; j++) {
+            var c0 = performance.now();
+            new Function('module', 'define', 'exports', src);
+            compMs.push(+(performance.now() - c0).toFixed(1));
+            await wait(30);
+        }
+
+        // 引擎可用性判定本身也有成本（isSupported 会探测 MSE）
+        var supMs = 0;
+        try {
+            var s0 = performance.now();
+            var okSup = !!(window.Hls && window.Hls.isSupported && window.Hls.isSupported());
+            supMs = +(performance.now() - s0).toFixed(1);
+        } catch (eS) {}
+
+        // 对照组：整份 dist（vendor + 全部模块，约 838KB）的**预解析**要多久。
+        // 只建函数不执行：dist 在本页已经跑过一次，再执行一遍会被重入 guard
+        // （via-vp: already loaded）挡在开头，量出来的是残缺数字，不能当分母。
+        var distMs = -1, distErr = '';
+        try {
+            var dres = await fetch('/dist/vv-77.js', { cache: 'no-store' });
+            var dsrc = await dres.text();
+            var d0 = performance.now();
+            new Function(dsrc);
+            distMs = +(performance.now() - d0).toFixed(1);
+        } catch (eDf) { distErr = String(eDf && eDf.message || eDf); }
+
+        var sorted = dts.slice().sort(function (a, b) { return a - b; });
+        var med = sorted[Math.floor(sorted.length / 2)];
+        send({ tag: 'perf', bytes: src.length, netMs: netMs, rounds: dts, med: med,
+            cold: dts[0], warm: dts[dts.length - 1], compile: compMs, isSupMs: supMs,
+            distMs: distMs, distErr: distErr, distBytes: (typeof dsrc === 'string' ? dsrc.length : 0),
+            hlsVer: prevVer, pageStart: Math.round(window.__tPageStart),
+            uaVer: (navigator.userAgent.match(/Chrome\/[\d.]+/) || [''])[0] });
+        hud.textContent = 'cold=' + dts[0] + 'ms  med=' + med + 'ms  pageStart='
+            + Math.round(window.__tPageStart) + 'ms';
+        send({ tag: 'done' });
+    }
+    main().catch(function (e) { send({ tag: 'done', err: String(e && e.message || e) }); });
+})();
+</script>
+</body>
+</html>
