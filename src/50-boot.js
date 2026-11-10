@@ -106,6 +106,10 @@ function vvMain() {
                         // 清单在飞 / 最近一次真的有字节到账（直连 mp4 也能看到）
                         manif: !!a._manifLoadingSince,
                         netAgo: a._netAt ? now - a._netAt : -1,
+                        // 判死走的是 dead 分支（HTTP>=400 / 连续失败）还是证据分支，
+                        // 光看 flow 分不出来——这两个字段是给"为什么 12s 就弹了卡片"用的
+                        httpCode: a._lastHttpCode || 0,
+                        netFail: a._netFail || 0,
                         flow: (function () { try { return vvNetFlow(a, now); } catch (eF) { return -1; } })(),
                         wdogAge: a._wdogT0 ? Math.round((now - a._wdogT0) / 1000) : 0,
                         rx: VID ? VID.readyState : -1,

@@ -47,8 +47,8 @@ results.push(await run('⑨ 加载进度界面截图', 'scripts/load-shot.mjs', 
 
 results.push(await run('⑩ 选集（真实 DOM 识别 / 网格 / 切集）', 'scripts/episodes-verify.mjs', [], { PORT: String(ports.episodes) }));
 
-// 慢资源判据是"时间相关"的：跑 3 个场景约 2 分钟。想缩短可用 SCENARIOS=stall 只跑判死边界。
-results.push(await run('⑪ 慢资源起播（限速 / 卡顿 / 假活源）', 'scripts/slow-media-verify.mjs', [], { PORT: String(ports.slow) }));
+// 慢资源判据是"时间相关"的：跑 5 个场景约 3.5 分钟。想缩短可用 SCENARIOS=stall 只跑判死边界。
+results.push(await run('⑪ 慢资源起播（限速 / 卡顿 / 假活源 / HLS 清单 / HLS 首片）', 'scripts/slow-media-verify.mjs', [], { PORT: String(ports.slow) }));
 
 console.log('\n\n################ 总览 ################');
 let failed = 0;

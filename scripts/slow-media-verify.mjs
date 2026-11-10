@@ -6,7 +6,7 @@
 // 真机上很常见，靠单测造不出来，必须真的限速跑一遍。
 //
 // 用法：
-//   node scripts/slow-media-verify.mjs                 # 三个场景全跑（约 2 分钟）
+//   node scripts/slow-media-verify.mjs                 # 五个场景全跑（约 3.5 分钟）
 //   SCENARIOS=stall,dead node scripts/slow-media-verify.mjs   # 只跑判死边界
 //   PORT=8096 node scripts/slow-media-verify.mjs        # 本地服务端口
 //
@@ -16,9 +16,18 @@
 //           不自救，数据恢复后能播起来。
 //   dead    假活源：只发 1 字节然后停住。这条是反向保险——续命不能变成无限等，
 //           必须在弱证据上限（45s）之后给出结论。
+//   hls-manifest  HLS 清单慢：清单 13s 才下完（分片很快）。hls 在清单阶段一个分片都还没
+//           开始下，只有 FRAG_* 事件时看门狗等于瞎的——这条就是为补的 MANIFEST_LOADING /
+//           LEVEL_LOADING 在飞信号上的保险。
+//   hls-frag      HLS 首片慢：清单很快，首个分片 16KB/s 约 15s。模拟弱网下第一片下不完。
+//
+// HLS 的两条用 e2e/media/hls/*.ts（10s 一段，共两段）当分片，清单在 .tmp/hls-gen/ 里按
+// 本轮端口现生成——分片地址必须写成绝对地址，才能给清单和分片分别挂不同的限速参数
+// （相对地址只能继承清单自己的 query，挂不到分片上）。
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const WS = 'C:/Users/Administrator/.workbuddy/binaries/node/workspace/index.js';
@@ -34,6 +43,27 @@ const BROWSERS = [
     'C:/Program Files/Google/Chrome/Application/chrome.exe',
     'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 ];
+
+// 按本轮端口现生成清单：清单慢的场景要让清单自己带 stall，分片快；分片慢的场景相反。
+function hlsManifest(id, manifQuery, segQuery) {
+    const dir = join(process.cwd(), '.tmp', 'hls-gen');
+    mkdirSync(dir, { recursive: true });
+    const lines = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:10',
+        '#EXT-X-PLAYLIST-TYPE:VOD',
+        '# 本地限速回归用：分片写绝对地址，才能单独给分片挂限速参数',
+        '#EXTINF:10.000,',
+        `http://127.0.0.1:${SLOW_PORT}/e2e/media/hls/seg0.ts?kbps=${segQuery}`,
+        '#EXTINF:10.000,',
+        `http://127.0.0.1:${SLOW_PORT}/e2e/media/hls/seg1.ts?kbps=${segQuery}`,
+        '#EXT-X-ENDLIST',
+        ''
+    ];
+    writeFileSync(join(dir, id + '.m3u8'), lines.join('\n'));
+    return { file: `.tmp/hls-gen/${id}.m3u8`, query: manifQuery };
+}
 
 function proxyArgs() {
     const p = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy;
@@ -72,6 +102,32 @@ const SCENARIOS = [
             c.chk(c.errAt < 0 || c.errAt >= 35000, '35s 前不误报（弱证据还在宽限期内）');
             c.chk(c.err > 0, '最终给出「播不了」的结论（没有无限等）');
             c.chk(c.errAt < 0 || c.errAt <= 54000, '结论落在弱证据上限 45s 附近（≤54s）');
+        }
+    },
+    {
+        id: 'hls-manifest',
+        title: 'HLS 清单慢（清单 stall 13s，分片很快）',
+        type: 'HLS',
+        ...hlsManifest('hls-manifest', 'kbps=1&stallAfter=1&stallMs=13000', 3000),
+        dur: 28,
+        check(c) {
+            c.chk(c.err === 0, '清单慢不许弹「这个视频源播不了」');
+            c.chk(c.rescue === 0, '不销毁重建播放实例');
+            c.chk(c.ext >= 1, '12s 时按「清单在飞」续命，而不是判死');
+            c.chk(c.played, '清单下完后正常出画');
+        }
+    },
+    {
+        id: 'hls-frag',
+        title: 'HLS 首片慢（清单很快，首个分片 16KB/s 约 15s）',
+        type: 'HLS',
+        ...hlsManifest('hls-frag', 'kbps=3000', 16),
+        dur: 34,
+        check(c) {
+            c.chk(c.err === 0, '首片慢不许弹「这个视频源播不了」');
+            c.chk(c.rescue === 0, '不销毁重建播放实例');
+            c.chk(c.ext >= 1, '12s 时按「分片在飞」续命');
+            c.chk(c.played, '首片下完后正常出画');
         }
     }
 ];
@@ -140,13 +196,15 @@ try {
         await page.goto(BASE + '/e2e/index.html?vvdebug=1', { waitUntil: 'domcontentloaded' });
         await page.waitForFunction(() => !!(window.__vv && window.__vv.open), { timeout: 15000 });
         await sleep(300);
-        const media = `http://127.0.0.1:${SLOW_PORT}/${sc.file}?kbps=${sc.kbps}${sc.extra}`;
-        const t0 = await page.evaluate((hookSrc, u) => {
+        const qs = sc.query || `kbps=${sc.kbps}${sc.extra}`;
+        const media = `http://127.0.0.1:${SLOW_PORT}/${sc.file}?${qs}`;
+        const kind = sc.type || 'MP4';
+        const t0 = await page.evaluate((hookSrc, u, k) => {
             (0, eval)('(' + hookSrc + ')')();
             const t = performance.now();
-            try { window.__vv.open({ url: u, type: 'MP4' }); } catch (e) {}
+            try { window.__vv.open({ url: u, type: k }); } catch (e) {}
             return t;
-        }, PAGE_HOOK.toString(), media);
+        }, PAGE_HOOK.toString(), media, kind);
 
         const samples = [];
         const until = Date.now() + sc.dur * 1000;
@@ -169,7 +227,9 @@ try {
                     ldet: ld ? ((ld.querySelector('.vv-load-detail') || {}).textContent || '') : '',
                     lon: ld ? (ld.className.indexOf('on') >= 0 ? 1 : 0) : -1,
                     // 续命 / 自救 / 证据档位：判定过程本身也要能看见，不然只能靠猜
-                    ext: d.ext, rescue: d.rescue, flow: d.flow, wdogAge: d.wdogAge
+                    ext: d.ext, rescue: d.rescue, flow: d.flow, wdogAge: d.wdogAge,
+                    manif: d.manif ? 1 : 0, loading: d.loading ? 1 : 0, netAgo: d.netAgo,
+                    httpCode: d.httpCode, netFail: d.netFail
                 };
             }, t0).catch(() => null);
             if (s) samples.push(s);
@@ -202,6 +262,21 @@ try {
         };
         sc.check(ctx);
         for (const line of out) console.log('  ' + line);
+        // 有失败时打一条「判据时间线」：只看最终数字分不清是证据没建立、
+        // 还是证据建立了但续命逻辑没生效
+        if (out.some((l) => l.startsWith('✘'))) {
+            console.log('  判据时间线（状态变化才打）：');
+            let prev = '';
+            for (const s of samples) {
+                const key = [s.rx, s.ns, s.manif, s.loading, s.flow, s.ext, s.err].join('|');
+                if (key === prev) continue;
+                prev = key;
+                console.log(`    ${String((s.el / 1000).toFixed(1)).padStart(5)}s rx=${s.rx} ns=${s.ns}` +
+                    ` 清单在飞=${s.manif} 分片在飞=${s.loading} 证据=${s.flow} 续命=${s.ext}` +
+                    ` 到账=${s.netAgo < 0 ? '-' : ((s.netAgo / 1000).toFixed(1) + 's前')} 错误卡=${s.err}` +
+                    ` http=${s.httpCode || 0} netFail=${s.netFail || 0}`);
+            }
+        }
         console.log(`  现场：错误卡 ${ctx.err} 次` + (ctx.errAt >= 0 ? `（首次 ${(ctx.errAt / 1000).toFixed(1)}s「${ctx.errText}」）` : '') +
             `；续命 ${ctx.ext} 次；自救 ${ctx.rescue}；最高证据档 ${ctx.maxFlow}；出画 ${ctx.played ? 'Y' : 'N'}`);
         const last = samples[samples.length - 1] || {};

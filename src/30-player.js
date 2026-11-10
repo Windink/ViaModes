@@ -863,8 +863,13 @@ function vvArmStartWatchdog(delay) {
                 var nowMs = Date.now();
                 var t0 = act._wdogT0 || nowMs;
                 var elapsed = (nowMs - t0) / 1000;
-                // 源站明说不行（4xx / 连续多次连不上）就不等了：那不是"慢"，是拒绝。
-                var dead = code >= 400 || netFail >= 3;
+                // 源站明说不行（4xx）就不等了：那不是"慢"，是拒绝。
+                // 注意：**不能把 hls.js 的重试次数当判死依据**。弱网下它自己会按
+                // maxTimeToFirstByteMs 超时重试，一次卡顿就能刷出 3 次 NETWORK_ERROR，
+                // 而请求其实还挂着、数据也还在来——那正是"慢"。
+                // 真拉不动的，hls.js 会给出 fatal，走它自己的错误分支；看门狗这边
+                // 还有弱证据 45s / 总上限 120s 兜底，不会无限等。
+                var dead = code >= 400;
                 var flow = dead ? 0 : vvNetFlow(act, nowMs);
                 var strong = flow >= 2;
                 // 有没有确认过"链路是通的"：收到过字节、或元数据已经解析出来。

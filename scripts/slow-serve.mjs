@@ -33,6 +33,14 @@ function pickFile(pathname) {
     }
 }
 
+// HLS 用：清单与分片的 MIME 必须分开给，别一律当 video/mp4
+function mimeOf(file) {
+    if (/\.m3u8?$/i.test(file)) return 'application/vnd.apple.mpegurl';
+    if (/\.ts$/i.test(file)) return 'video/mp2t';
+    if (/\.m4s$/i.test(file)) return 'video/iso.segment';
+    return 'video/mp4';
+}
+
 const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     if (u.pathname === '/health') { res.end('ok'); return; }
@@ -52,7 +60,7 @@ const server = http.createServer((req, res) => {
     }
     const len = end - start + 1;
     const head = {
-        'Content-Type': 'video/mp4',
+        'Content-Type': mimeOf(hit.file),
         'Content-Length': String(len),
         'Accept-Ranges': 'bytes',
         // 别让浏览器缓存替我们省掉流量：这个服务就是在量"没缓存时慢慢下"的行为

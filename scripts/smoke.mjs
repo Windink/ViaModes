@@ -1507,6 +1507,17 @@ function wdogVid(rs, ns) {
     eq('HTTP 403：有字节也不续命', (T.VV._startWdogExtend || 0) - ext403, 0);
     T.disarmWdog();
 
+    // hls.js 自己按 TTFB 超时重试，一次卡顿就能刷出 3 次以上 NETWORK_ERROR，而请求
+    // 其实还挂着、数据也还在来。以前 _netFail>=3 直接判死，弱网下 12s 就弹「播不了」，
+    // 而 hls 在 13s 自己恢复了——必须按证据判，不能按重试次数判。
+    wv.readyState = 0; wv.networkState = 2;
+    T.setActive({ item: { type: 'HLS' }, _netFail: 5, _manifLoadingSince: Date.now(), _rescue: 0, _wdogT0: Date.now() });
+    const extNf = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('重试次数 ≠ 源站死了：清单在飞时仍续命', (T.VV._startWdogExtend || 0) - extNf, 1);
+    T.disarmWdog();
+
     // 数据确实不流了、但元数据到了 → 这时才按"解码器抢不到"自救
     wv.readyState = 1; wv.networkState = 1;
     T.setActive({ item: { url: 'https://cdn.a.com/x.mp4', type: 'MP4' }, _netAt: 0, _rescue: 0, _wdogT0: Date.now() });
