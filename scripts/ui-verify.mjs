@@ -669,17 +669,36 @@ try {
     ok('更多菜单含「重建播放实例」', (more.labels || []).some((l) => /重建播放实例/.test(l)), (more.labels || []).join(' | '));
 
     // ============ O. 关闭播放器：解冻 + 恢复页面媒体 ============
-    // 先让页面原生视频播起来，播放器打开时应被暂停，关闭后应恢复
+    // 先让页面原生视频播起来，播放器打开时应被暂停，关闭后应恢复。
+    // 上一段（菜单 / 画质 / 拖动）结束时播放器还开着，而播放器开着期间页面媒体是
+    // 被有意收起的（没有 src）。这里必须先关掉、等它把页面视频装回去，
+    // 否则"先播起来"这一步根本不成立（src 为空时 play() 不会有结果）。
+    await page.evaluate(async () => {
+        try { if (window.__vv && window.__vv.VV.playerActive) window.__vv.close(); } catch (e) {}
+        await new Promise((r2) => setTimeout(r2, 1800));
+    });
+    // 注意：这里必须给 play() 兜一个超时。元素没地址时 play() 可能一直 pending，
+    // await 会挂死整个用例（表现为 CDP protocol timeout，看不出是哪一步）。
+    const preO = await page.evaluate(() => {
+        const v = document.getElementById('v1');
+        return {
+            src: v ? (v.getAttribute('src') || null) : null,
+            cur: v ? String(v.currentSrc || '').slice(0, 48) : '',
+            paused: v ? v.paused : null,
+            rs: v ? v.readyState : -1,
+            held: (window.__vv.VV._pageMedia || []).length
+        };
+    });
     await page.evaluate(async () => {
         const v = document.getElementById('v1');
-        try { v.muted = true; await v.play(); } catch (e) {}
+        try { v.muted = true; await Promise.race([v.play().catch(() => {}), new Promise((r2) => setTimeout(r2, 3000))]); } catch (e) {}
         await new Promise((r2) => setTimeout(r2, 600));
     });
     const pageMedia = await page.evaluate(async () => {
         const v = document.getElementById('v1');
         return { playing: !v.paused };
     });
-    ok('页面原生视频本来在播放', pageMedia.playing);
+    ok('页面原生视频本来在播放', pageMedia.playing, JSON.stringify(preO));
 
     await page.evaluate(async () => {
         window.__vv.open(window.__vv.VV.items[0]);

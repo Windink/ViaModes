@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>起播耗时对照台</title>
+<style>
+    body { margin: 0; background: #111; color: #ddd; font: 13px/1.6 system-ui, sans-serif; }
+    h1 { font-size: 14px; margin: 10px 12px 4px; font-weight: 600; }
+    .hint { margin: 0 12px 10px; color: #888; font-size: 12px; }
+    video { width: 360px; height: 203px; background: #000; display: block; margin: 0 12px 10px; }
+    #log { margin: 0 12px; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; color: #9f9; }
+</style>
+</head>
+<body>
+<h1>起播耗时对照台</h1>
+<p class="hint">同一个 m3u8、同一台机器、同一档弱网：上排是「站点自己用 hls.js」的起播，下排是内置播放器的起播。</p>
+<video id="site" playsinline muted></video>
+<div id="log"></div>
+
+<script src="vendor/hls.min.js"></script>
+<script src="../dist/via-video-player.user.js"></script>
+<script>
+(function () {
+    // 公开测试流：主清单里带 240p/360p/480p/720p/1080p 多档，起播选档差异能直接看出来
+    var HLS_URL = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+    // ?src= 可换成单档清单：只想量「我们自己的开销」时，用单档流把"选档差异"这个变量剔掉
+    try {
+        var _q = new URLSearchParams(location.search);
+        if (_q.get('src')) HLS_URL = _q.get('src');
+    } catch (e0) {}
+    var $ = function (id) { return document.getElementById(id); };
+    var TIMEOUT = 30000;
+
+    // marks: { engine, manifest, meta, data, frame } 都是「相对启动时刻的毫秒」
+    var bench = window.__bench = {
+        url: HLS_URL,
+        kind: '', t0: 0, marks: {}, level: null, done: false, failed: ''
+    };
+
+    function now() { return Math.round(performance.now()); }
+
+    function mark(k) {
+        if (bench.marks[k] === undefined) bench.marks[k] = now() - bench.t0;
+    }
+
+    function log() {
+        var m = bench.marks, parts = [];
+        ['engine', 'manifest', 'meta', 'data', 'frame'].forEach(function (k) {
+            if (m[k] !== undefined) parts.push(k + ' ' + m[k] + 'ms');
+        });
+        $('log').textContent = bench.kind + ': ' + parts.join(' / ') +
+            (bench.level ? '  [' + bench.level + ']' : '') + (bench.failed ? '  FAIL ' + bench.failed : '');
+    }
+
+    function describe(hlsInst) {
+        try {
+            if (!hlsInst || typeof hlsInst.currentLevel !== 'number' || hlsInst.currentLevel < 0) return '';
+            var lv = (hlsInst.levels || [])[hlsInst.currentLevel];
+            if (!lv) return '';
+            return (lv.height || '?') + 'P/' + Math.round((lv.bitrate || 0) / 1000) + 'k';
+        } catch (e) { return ''; }
+    }
+
+    // 采样器：20ms 一档，把「引擎就绪 / 清单解析 / 有元数据 / 有当前数据 / 出画面」分开记，
+    // 这样一旦慢，能看出是慢在网络、慢在选档，还是慢在解码起播。
+    function startPolling(get) {
+        var stop = Date.now() + TIMEOUT;
+        var timer = setInterval(function () {
+            try {
+                if (bench.done) { clearInterval(timer); return; }
+                var s = get() || {};
+                if (s.engine && bench.marks.engine === undefined) mark('engine');
+                if (s.manifest && bench.marks.manifest === undefined) mark('manifest');
+                if (s.meta && bench.marks.meta === undefined) mark('meta');
+                if (s.data && bench.marks.data === undefined) mark('data');
+                if (s.level && !bench.level) bench.level = s.level;
+                if (s.frame && bench.marks.frame === undefined) {
+                    mark('frame');
+                    bench.done = true;
+                    clearInterval(timer);
+                }
+                log();
+            } catch (e) {
+                bench.failed = String(e && e.message || e);
+                bench.done = true;
+                clearInterval(timer);
+            }
+            if (Date.now() > stop && !bench.done) {
+                bench.failed = 'timeout';
+                bench.done = true;
+                clearInterval(timer);
+                log();
+            }
+        }, 20);
+    }
+
+    // —— 场景 A：站点自己的播放器（裸 hls.js，参数与常见站点一致）——
+    bench.siteStart = function () {
+        var v = $('site');
+        bench.kind = 'site'; bench.t0 = now();
+        var inst;
+        try {
+            inst = new Hls({ enableWorker: true, lowLatencyMode: false });
+        } catch (e) { bench.failed = 'new Hls: ' + (e && e.message); return 'fail'; }
+        window.__pageHls = inst;
+        inst.attachMedia(v);
+        inst.loadSource(HLS_URL);
+        startPolling(function () {
+            return {
+                engine: true,
+                manifest: !!(inst.levels && inst.levels.length),
+                meta: v.readyState >= 1,
+                data: v.readyState >= 2,
+                frame: v.currentTime > 0,
+                level: describe(inst)
+            };
+        });
+        try { v.play().catch(function () {}); } catch (eP) {}
+        return 'ok';
+    };
+
+    // —— 场景 B：内置播放器 ——
+    bench.ourStart = function () {
+        bench.kind = 'ours'; bench.t0 = now();
+        var api = window.__vv;
+        if (!api || !api.open) { bench.failed = 'no __vv'; return 'fail'; }
+        try { api.open({ url: HLS_URL, type: 'HLS', name: '起播耗时' }); }
+        catch (e) { bench.failed = String(e && e.message); return 'fail'; }
+        startPolling(function () {
+            var act = api.VV && api.VV.active;
+            var v = document.querySelector('.vv-player-video');
+            var inst = act && act.hls;
+            return {
+                // 「引擎就绪」= hls 实例已经建出来（含 await 取 CDN 的那段）
+                engine: !!(inst || (act && act._inst)),
+                manifest: !!(inst && inst.levels && inst.levels.length),
+                meta: !!(v && v.readyState >= 1),
+                data: !!(v && v.readyState >= 2),
+                frame: !!(v && v.currentTime > 0 && v.videoWidth > 0),
+                level: describe(inst)
+            };
+        });
+        return 'ok';
+    };
+
+    bench.result = function () {
+        return {
+            kind: bench.kind,
+            marks: bench.marks,
+            level: bench.level,
+            failed: bench.failed,
+            items: (window.__vv && window.__vv.VV && window.__vv.VV.items || []).length
+        };
+    };
+
+    // 关掉我们的播放器，便于同一页里跑下一轮
+    bench.closeOur = function () {
+        try { window.__vv && window.__vv.close && window.__vv.close(); } catch (e) {}
+        try { if (window.__pageHls) { window.__pageHls.destroy(); window.__pageHls = null; } } catch (e2) {}
+    };
+})();
+</script>
+</body>
+</html>

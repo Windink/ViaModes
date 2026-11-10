@@ -87,8 +87,12 @@ function vvApTamePreload(el) {
     } catch (e) {}
 }
 
-function vvApRestorePreload() {
+// force=true 用于关闭内置播放器时强制还原。
+// 播放器开着的时候不还原：那是"我们正在播"的时段，页面预载会跟播放器抢带宽
+// （30-player 的 vvStopPagePreload 会把它按成 none）。
+function vvApRestorePreload(force) {
     try {
+        if (!force && VV && VV.playerActive) return;
         var els = document.querySelectorAll('video');
         for (var i = 0; i < els.length; i++) {
             var el = els[i];

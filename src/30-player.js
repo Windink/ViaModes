@@ -12,6 +12,10 @@ function openPlayer(item) {
     vvToggleBadge(false);
     vvSetPageFreeze(true);
     vvPausePageMedia();
+    // 暂停只停解码，preload 还会继续拉流；这里把页面媒体的预载一起按住，
+    // 否则弱网下它在后台跟我们的首片抢带宽（真机上表现为"插件比网页慢/卡"）
+    vvStopPagePreload();
+    vvStartPreloadGuard();
     // 先把话放出去：别的页签收到就交还解码器。Android 的硬件解码器是设备级的，
     // 不打招呼的话，多开几个视频页就会轮到"分片能下、就是不出画"。
     try { vvRequestPeerRelease(); } catch (ePR) {}
@@ -204,6 +208,138 @@ function vvPausePageMedia() {
     } catch (e) {}
 }
 
+// 播放器打开期间，页面自己的播放器光「暂停」是不够的。
+//
+// <video> 暂停后 preload 仍然有效：站点播放器普遍 preload="auto"，暂停只是停了解码，
+// 分片还在继续下载，弱网/移动数据下等于跟我们的首片抢带宽——用户看到的是
+// 「网页播放器很顺，插件播放器又慢又卡」。实测只把 preload 压成 none 不够：属性改完
+// 浏览器仍会重新发起一次元数据请求，缓冲还在长；只有摘掉 src 才真的把网络停掉。
+//
+// 所以对**非 blob**、且当前没在播的页面媒体整条收起来（`vvDetachMedia`）。
+// 注意这条链路【不复用】`VV._pageMedia`：那份清单的语义是「我正在播、关掉播放器后要
+// 自动续播」，混进来会把续播逻辑搞乱（曾经把同一元素记两遍，导致播放器打开时页面视频
+// 根本没被暂停）。这里用独立的 `VV_PRELOAD_HELD`，关闭时只装回 src、不自动起播。
+//
+// blob/MSE（currentSrc 以 blob: 开头）不能摘：摘了站点那条 MediaSource 就 closed，
+// 关掉播放器也装不回来。这类只把 preload 按成 none，尽量少拉。
+// 正在播的那些由 `vvPausePageMedia` 负责（它会连解码器一起收），这里跳过。
+function vvStopPagePreload() {
+    var els;
+    try { els = document.querySelectorAll('video,audio'); } catch (e) { return; }
+    for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        try {
+            if (!el) continue;
+            if (ROOT && ROOT.contains(el)) continue;      // 我们自己的播放器
+            if (el.mediaKeys) continue;                    // DRM 的别碰
+            var src = '';
+            try { src = el.currentSrc || el.getAttribute('src') || ''; } catch (eS) {}
+            if (!src) continue;
+            // 正在播的归 vvPausePageMedia 管（它要连解码器一起收，并且要在关闭时续播）
+            var playing = false;
+            // 只有明确 paused===false 才算在播：某些壳里 paused 可能是 undefined，
+            // 用 !el.paused 会把"没在播"误判成在播而整条跳过
+            try { playing = el.paused === false && !el.ended; } catch (eP0) {}
+            if (playing) continue;
+            // 已经在某个清单里：上一轮收过了，别重复记账
+            if (vvPreHeldIndexOf(el) >= 0) continue;
+            if (src.indexOf('blob:') === 0) {
+                // MSE：只能尽量让它别预载
+                if (!el.__vvPreSaved) {
+                    el.__vvPreSaved = true;
+                    el.__vvPreAttr = el.getAttribute('preload');
+                    VV._pagePreload = VV._pagePreload || [];
+                    VV._pagePreload.push(el);
+                }
+                if (el.getAttribute('preload') !== 'none') el.setAttribute('preload', 'none');
+                continue;
+            }
+            var t = 0, muted = false, pre = null;
+            try { t = el.currentTime || 0; } catch (eT) {}
+            try { muted = (el.__vvMuted !== undefined ? el.__vvMuted : !!el.muted); } catch (eM) {}
+            try { pre = el.getAttribute('preload'); } catch (ePr) {}
+            VV_PRELOAD_HELD.push({ el: el, src: src, t: t, muted: muted, pre: pre });
+            VV._preloadAbort = (VV._preloadAbort || 0) + 1;
+            vvDetachMedia(el);
+        } catch (e1) {}
+    }
+}
+
+function vvPreHeldIndexOf(el) {
+    for (var i = 0; i < VV_PRELOAD_HELD.length; i++) {
+        if (VV_PRELOAD_HELD[i] && VV_PRELOAD_HELD[i].el === el) return i;
+    }
+    return -1;
+}
+
+// 关播放器时把页面媒体装回去。
+// 不自动起播：这些元素进播放器前就是暂停的，用户没点播放就不该自己动。
+// preload 属性按原样还回去，站点自己的播放/暂停逻辑决定什么时候重新拉流。
+function vvRestorePagePreload() {
+    var list = VV._pagePreload || [];
+    VV._pagePreload = [];
+    for (var i = 0; i < list.length; i++) {
+        var el = list[i];
+        try {
+            if (!el || !el.__vvPreSaved) continue;
+            if (el.__vvPreAttr) el.setAttribute('preload', el.__vvPreAttr);
+            else el.removeAttribute('preload');
+            el.__vvPreSaved = false;
+            el.__vvPreAttr = null;
+        } catch (e) {}
+    }
+    var held = VV_PRELOAD_HELD;
+    VV_PRELOAD_HELD = [];
+    for (var k = 0; k < held.length; k++) {
+        (function (rec) {
+            var v = rec && rec.el;
+            if (!v) return;
+            try {
+                if (rec.pre) v.setAttribute('preload', rec.pre);
+                else v.removeAttribute('preload');
+            } catch (e0) {}
+            // 已经被站点/我们的其它链路装回去了：只把静音状态还回去
+            if (vvHasSrc(v)) {
+                try { v.muted = !!rec.muted; } catch (e1) {}
+                try { delete v.__vvUsMuted; delete v.__vvMuted; delete v.__vvVol; } catch (e2) {}
+                return;
+            }
+            try {
+                // 用属性写回（和站点自己写 src 的方式一致，也让测试桩能观察到）
+                v.setAttribute('src', rec.src);
+                if (rec.t > 0.5) {
+                    var once = function () {
+                        try { v.removeEventListener('loadedmetadata', once); } catch (e3) {}
+                        try { if (!v.__vvUserPlayed) v.currentTime = rec.t; } catch (e4) {}
+                    };
+                    v.addEventListener('loadedmetadata', once);
+                }
+                v.muted = !!rec.muted;
+                delete v.__vvUsMuted; delete v.__vvMuted; delete v.__vvVol;
+                v.load();
+            } catch (e5) {}
+        })(held[k]);
+    }
+}
+
+// 播放中定时补扫：站点会在播放期间自己建新的播放器/预载下一集，
+// 只靠打开那一刻扫一遍会漏（广告位、下一集预载都是后建的）
+function vvStartPreloadGuard() {
+    vvStopPreloadGuard();
+    VV._preloadTimer = setInterval(function () {
+        try {
+            if (!VV.playerActive) { vvStopPreloadGuard(); return; }
+            vvStopPagePreload();
+        } catch (e) { vvStopPreloadGuard(); }
+    }, 3000);
+}
+
+function vvStopPreloadGuard() {
+    try {
+        if (VV._preloadTimer) { clearInterval(VV._preloadTimer); VV._preloadTimer = 0; }
+    } catch (e) {}
+}
+
 function vvResumePageMedia() {
     var list = VV._pageMedia || [];
     VV._pageMedia = [];
@@ -263,6 +399,10 @@ var ROOT = null, VID = null, BRIGHT = null, TOPBAR = null, BOTBAR = null, CBTN =
     // 时长元素与当前秒文案缓存：timeupdate 约 4Hz，原来每次都 getElementById('vv-dur')
     // 并用 innerHTML 重建文本节点；文案按秒变化，缓存后绝大多数回调可以直接跳过。
     DUREL = null, LAST_CUR_TXT = '';
+
+// 播放器打开期间被「整条收起来」的页面媒体（不是 VV._pageMedia：那份是"要续播"的语义）。
+// 关闭播放器时只装回 src 与静音状态，不自动起播。
+var VV_PRELOAD_HELD = [];
 
 // 播放态低特效：开关只落在播放器根层的 class 上，CSS 一律按这个 class 匹配。
 // 换源/重建 ROOT 时会在 vvEnsurePlayerRoot 里重新同步，避免改了设置却不生效。
@@ -656,6 +796,20 @@ function vvArmStartWatchdog() {
                 var act = VV.active || {};
                 var netFail = act._netFail || 0;
                 var code = act._lastHttpCode || 0;
+                // 数据还在往下走就先别判死。
+                // 1080P 站点的一片常见 2~6MB，弱网下 12s 拿不到完整首片很正常；以前这里
+                // 一律按"解码器抢不到"处理，会销毁 hls 再从零重下，用户看到的是空转十几秒，
+                // 而且每次重下又从头开始——真机上"插件比网页慢一大截"多半是这一条。
+                // 判据用「分片正在下」或「10s 内刚下到过分片」，只放宽两次（最多再等 24s）。
+                var nowMs = Date.now();
+                var fragBusy = act._fragLoadingSince && nowMs - act._fragLoadingSince < 45000;
+                var fragFresh = act._fragLoadedAt && nowMs - act._fragLoadedAt < 10000;
+                if ((fragBusy || fragFresh) && (act._wdogExtend || 0) < 2) {
+                    act._wdogExtend = (act._wdogExtend || 0) + 1;
+                    VV._startWdogExtend = (VV._startWdogExtend || 0) + 1;
+                    vvArmStartWatchdog();
+                    return;
+                }
                 // 已经拿到元数据/分片，却一直没出画面：先按"解码器抢不到"自救，
                 // 别把这种情形误报成"防盗链/地址失效"。
                 if (VID.readyState >= 1 && !act._blobOnly && !act._nativeTried) {
@@ -701,10 +855,18 @@ function vvArmFrameWatch() {
             if (VID.error) { vvDisarmFrameWatch(); return; }
             // 有画面在走：正常
             if (!VID.paused && VID.currentTime > 0.08) { vvDisarmFrameWatch(); return; }
-            // 数据已经够了（HAVE_CURRENT_DATA 以上）却一帧都不出 → 解码器没拿到
-            if (el > 3200 && !VID.paused && VID.readyState >= 2) {
-                vvDisarmFrameWatch();
-                vvCodecRescue('no-frame');
+            // 数据已经够了（HAVE_FUTURE_DATA 以上）却一帧都不出 → 解码器没拿到。
+            // 判据要卡在"真的一帧都没解出来"：readyState 只到 2（HAVE_CURRENT_DATA）时
+            // 解码器可能还在初始化，这时候重建只会把刚拿到的分片丢掉、从头再来。
+            if (el > 4200 && !VID.paused && VID.readyState >= 3) {
+                var q = null;
+                try { q = VID.getVideoPlaybackQuality ? VID.getVideoPlaybackQuality() : null; } catch (eq) {}
+                var frames = q && typeof q.totalVideoFrames === 'number' ? q.totalVideoFrames : -1;
+                // frames 已经在涨：解码器是通的，只是 currentTime 还没跨过阈值，别重建
+                if (frames === 0 || frames === -1) {
+                    vvDisarmFrameWatch();
+                    vvCodecRescue('no-frame');
+                }
             }
         } catch (e) { vvDisarmFrameWatch(); }
     }, 600);
@@ -1052,6 +1214,8 @@ function vvLoadMedia(item) {
         VV.active._fragMsSum = 0;
         VV.active._fragBytesSum = 0;
         VV.active._fragLoadingSince = 0;
+        VV.active._fragLoadedAt = 0;
+        VV.active._wdogExtend = 0;
         VV.active._loaded = 0;
         VV.active._total = 0;
         VV.active._spd = 0;
@@ -1141,6 +1305,9 @@ function vvLoadMedia(item) {
                     try {
                         if (VV.active) {
                             VV.active._fragLoadingSince = 0;
+                            // 记录"最近一次真的拿到分片"的时刻：起播看门狗用它区分
+                            // 「网络慢但数据在走」和「流根本没动静」
+                            VV.active._fragLoadedAt = Date.now();
                             VV.active._netFail = 0;
                             VV.active._mediaFail = 0;
                             VV.active._hlsRetried = false;
@@ -1789,6 +1956,10 @@ function closePlayer() {
     // 如果页面视频在进播放器前被"后台休眠"摘过 src，这里必须装回去，
     // 否则退出播放器后它就是个没有地址的空壳，只能靠关页签恢复。
     try { if (typeof vvThawMedia === 'function') vvThawMedia(); } catch (et) {}
+    // 预载守卫必须在恢复页面媒体之前收工，否则刚还回去的 preload 又被按住
+    try { vvStopPreloadGuard(); } catch (epg) {}
+    try { vvRestorePagePreload(); } catch (epr) {}
+    try { if (typeof vvApRestorePreload === 'function') vvApRestorePreload(true); } catch (epr0) {}
     try { vvResumePageMedia(); } catch (er) {}
     try {
         if (document.fullscreenElement) document.exitFullscreen();

@@ -90,6 +90,23 @@ function vvMain() {
                 hideErr: vvHideErr,
                 armWatchdog: vvArmStartWatchdog,
                 disarmWatchdog: vvDisarmStartWatchdog,
+                // 起播诊断：看门狗放宽了几次、有没有触发解码器自救、最近一次拿到分片的时间。
+                // 真机上"插件起播比网页慢"只能靠这几个数分辨是网络慢还是重建循环。
+                startDiag: function () {
+                    var a = VV.active || {};
+                    var now = Date.now();
+                    return {
+                        ext: a._wdogExtend || 0,
+                        extAll: VV._startWdogExtend || 0,
+                        rescue: a._rescue || 0,
+                        lastRescue: VV._lastRescue || null,
+                        fragMs: a._fragMs || 0,
+                        fragAgo: a._fragLoadedAt ? now - a._fragLoadedAt : -1,
+                        loading: !!a._fragLoadingSince,
+                        rx: VID ? VID.readyState : -1,
+                        t: VID ? +(VID.currentTime || 0).toFixed(2) : -1
+                    };
+                },
                 // 泄漏自查：存活 hls 实例数（应为 0）、播放器视频元素是否还有 src
                 hlsPool: function () { return (VV._hlsPool || []).length; },
                 killAllHls: vvKillAllHls,
@@ -165,6 +182,25 @@ function vvMain() {
                 // 页面级解码器治理：本页还挂着几条媒体管线、被别的页签叫停过几次
                 releaseAllMedia: function (why) { try { return vvReleaseAllMedia(why || 'api'); } catch (e) { return -1; } },
                 pausePageMedia: function () { try { vvPausePageMedia(); } catch (e) {} },
+                // 页面预载治理：按住几条、守卫有没有在跑、当前页面还剩几条在拉的媒体
+                stopPagePreload: function () { try { vvStopPagePreload(); } catch (e) {} },
+                preloadState: function () {
+                    var n = 0;
+                    try {
+                        var els = document.querySelectorAll('video,audio');
+                        for (var i = 0; i < els.length; i++) {
+                            var s = '';
+                            try { s = els[i].currentSrc || els[i].getAttribute('src') || ''; } catch (e0) {}
+                            if (s && els[i].networkState === 2) n++;
+                        }
+                    } catch (e1) {}
+                    return {
+                        held: (VV._pagePreload || []).length,
+                        guard: !!VV._preloadTimer,
+                        loadingNow: n,
+                        aborts: VV._preloadAbort || 0
+                    };
+                },
                 pageMedia: function () { return (VV._pageMedia || []).length; },
                 peerStats: function () {
                     return {
