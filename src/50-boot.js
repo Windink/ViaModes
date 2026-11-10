@@ -112,6 +112,9 @@ function vvMain() {
                         netFail: a._netFail || 0,
                         flow: (function () { try { return vvNetFlow(a, now); } catch (eF) { return -1; } })(),
                         wdogAge: a._wdogT0 ? Math.round((now - a._wdogT0) / 1000) : 0,
+                        // 续播落位：早落位的目标位（0 = 没走早落位）、直连是否用了 #t=
+                        early: a._earlyT || 0,
+                        srcFrag: a._srcFrag ? 1 : 0,
                         rx: VID ? VID.readyState : -1,
                         t: VID ? +(VID.currentTime || 0).toFixed(2) : -1
                     };

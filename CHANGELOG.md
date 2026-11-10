@@ -1,37 +1,66 @@
 # 变更记录
 
-本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，  
 版本号遵循 `主.次.修订`，由 `build.mjs` 按产物哈希自动递增修订位（Via 的更新判断依赖 `@version`）。
 
 ## 记录规则
 
 1. **每次改动先在下面「未发布」段写一条**，说清「改了什么、为什么改」，不要只写「优化」「修复」。
 2. 分类用 `### 新增 / ### 变更 / ### 修复 / ### 移除 / ### 测试`，按需选用。
-3. **不必一个版本号对应一条**：几次改动可以合并成一条，跨过的版本号会自动写成区间
+3. **不必一个版本号对应一条**：几次改动可以合并成一条，跨过的版本号会自动写成区间  
    `## v0.1.53–v0.1.55 — 日期`。区间内的版本都算已记录，中间那些过渡版本不用单独成条。
-4. 跑 `node build.mjs` 时，「未发布」段会被**自动定版**为 `## v当前版本 — 日期`（跨版则写成区间），
+4. 跑 `node build.mjs` 时，「未发布」段会被**自动定版**为 `## v当前版本 — 日期`（跨版则写成区间），  
    并在顶部补一个空的「未发布」段。定版不看本次构建有没有升版本，所以「先 build 后补记」也能自愈。
-5. 「未发布」为空、当前版本又没有条目覆盖时，`build.mjs` 会打印 `!!! CHANGELOG 漏记 !!!`，
+5. 「未发布」为空、当前版本又没有条目覆盖时，`build.mjs` 会打印 `!!! CHANGELOG 漏记 !!!`，  
    而且每次构建都提醒，直到补上——这就是漏记。
 6. 只改文档、注释、测试断言也算改动，同样要记一行。
 
 ## 未发布
 
+## v0.1.78 — 2026-11-10
+
 ### 新增
 
-- `mumu-slow.mjs` + `e2e/slow-android.html`：把这五项慢资源判据搬到真机（MuMu + Via）跑。
-  桌面量的是页面脚本与 hls.js 的逻辑，量不到 Via 的 WebView 里首字节更晚、分片解码更慢、
-  `networkState` 抖动这些差异，而看门狗正是靠证据档位决定「续命还是判死」，边界得真机确认。
-  页面自己按场景 drive `__vv.open`、采样式断言后上报；驱动负责起静态 serve + 限速 slow-serve、
+- `mumu-slow.mjs` + `e2e/slow-android.html`：把这五项慢资源判据搬到真机（MuMu + Via）跑。  
+  桌面量的是页面脚本与 hls.js 的逻辑，量不到 Via 的 WebView 里首字节更晚、分片解码更慢、  
+  `networkState` 抖动这些差异，而看门狗正是靠证据档位决定「续命还是判死」，边界得真机确认。  
+  页面自己按场景 drive `__vv.open`、采样式断言后上报；驱动负责起静态 serve + 限速 slow-serve、  
   映射两个端口（页面与限速资源不同源）、换别名路径避开 Via 按 URL 命中的缓存
-- `slow-serve.mjs` 加 CORS（含 `OPTIONS` 与 `Expose-Headers`）：限速资源与测试台不同源，
+- `mumu-resume.mjs` + `e2e/resume-android.html`：续播起播耗时的真机量法。先播到设定秒数关掉  
+  （写下续播位置），再打开同一个已缓存文件，记录 metadata / seeking / seeked / playing 的时间点，  
+  重复 N 轮取中位数；`SAVE=1` 存基线，之后直接打印「基线 → 现在」的差值。  
+  量的时候两处坑：同一场景的 URL 必须跨轮稳定（续播记录按 URL 存），量一轮后要把位置摆回  
+  预置点（否则 currentTime 每轮往后走，几轮就漂进「快看完了」的尾巴区，续播被主动放弃）
+- `slow-serve.mjs` 加 CORS（含 `OPTIONS` 与 `Expose-Headers`）：限速资源与测试台不同源，  
   hls.js 用 XHR 取清单/分片，没有这几个头会把「慢」当「源坏了」，测出来是错的东西
 - `serve.mjs` 加 `/e2e/slow-android-<别名>.html` 映射，理由同上（Via 缓存按路径命中）
+- `serve.mjs` 加 `/e2e/resume-android-<别名>.html` 映射；诊断面板加 `early`（早落位的目标位）  
+  与 `srcFrag`（直连是否用了 `#t=`），否则"续播到底有没有提前落位"只能靠猜
+
+### 变更
+
+- **续播不再「先播 0s 附近、拿到元数据再 seek 过去」**，改成起播阶段就把位置带上：  
+  直连 mp4 用媒体片段 `#t=<秒>`（浏览器第一个 Range 就从目标位置取数据），  
+  HLS 在 `MANIFEST_PARSED` 时 `startLoad(t)`（直接拉目标位置的分片）。  
+  真机上这一步省的是「先下一片、再 flush 重下」的成本
+- 续播位置与「跳过片头」合成一个起播目标（`vvStartTarget`）：以前是 seek 到续播位置之后  
+  再判断要不要跳片头，一次打开连做两次 seek；现在取更靠后的那个位，一次落位
+- 起点靠媒体片段带过去有个前提是源支持 Range：万一被当成打不开（还没出过画面），  
+  退回不带片段的地址重来一次；已经出过画面的不这么重试——那会把用户丢回片头
 
 ### 测试
 
-- 真机（MuMu / Via 7.3.3 / WebView 110，v0.1.77）：`node scripts/mumu-slow.mjs` 19 项全过。
-  steady 续命 3 次、证据档 2；stall 卡 18s 不弹卡片、不重建、恢复后出画；dead 47.2s 才给
+- 真机（MuMu / Via 7.3.3 / WebView 110）`node scripts/mumu-resume.mjs`，3 轮中位数，  
+  同素材、同预置位置，只换脚本版本：
+  - 直连 mp4（10s / 720p，已缓存，续播 6.5s）：首帧 **1303ms → 993/1041ms**，  
+    metadata 之后那次 seeked 从 +1203ms 降到 +917ms
+  - HLS（20s，续播 8s）：首帧 **1011ms → 762/937ms**（波动较大，机制上是同一笔账）
+  - 残留的 ~0.9s 是这台模拟器起解码管线 + 跳到非关键帧位置的固有成本，不是 seek 逻辑的问题
+- `smoke.mjs` 380 → 397 项：新增 `vvStartTarget` 10 项（续播与片头取更靠后、已看完不落位、  
+  片头超片长夹到末尾、元数据未到时用记录时长判尾巴）与 `vvWithStartFragment` 6 项  
+  （无片段 / 带 query / 已有 `#t=` 替换 / 混写指令只换 t / 小数两位）
+- 真机（MuMu / Via 7.3.3 / WebView 110，v0.1.77）：`node scripts/mumu-slow.mjs` 19 项全过。  
+  steady 续命 3 次、证据档 2；stall 卡 18s 不弹卡片、不重建、恢复后出画；dead 47.2s 才给  
   「这个视频源播不了」（弱证据上限 45s，没有无限等）；hls-manifest / hls-frag 各续命 1 次后出画
 - 桌面 `slow-media-verify.mjs` 的 HLS 两条在加 CORS 后复跑仍全过（原先是靠同源巧合）
 
@@ -39,177 +68,177 @@
 
 ### 新增
 
-- `e2e/media/hls/seg0.ts` / `seg1.ts`（各 10s，共 20s）：本地 HLS 分片素材。慢网回归原来
+- `e2e/media/hls/seg0.ts` / `seg1.ts`（各 10s，共 20s）：本地 HLS 分片素材。慢网回归原来  
   只覆盖 mp4，HLS 的清单阶段与首片阶段只有 Node 侧断言——改判据时等于裸奔
-- `slow-media-verify.mjs` 加 `hls-manifest` / `hls-frag` 两个场景：
-  `hls-manifest`（清单 stall 13s、分片很快，验 MANIFEST_LOADING 在飞信号）、
-  `hls-frag`（清单很快、首片 16KB/s 约 15s，验 FRAG_LOADING 在飞信号）。
-  清单在 `.tmp/hls-gen/` 按本轮端口现生成：分片必须写成**绝对地址**，才能给清单和
+- `slow-media-verify.mjs` 加 `hls-manifest` / `hls-frag` 两个场景：  
+  `hls-manifest`（清单 stall 13s、分片很快，验 MANIFEST_LOADING 在飞信号）、  
+  `hls-frag`（清单很快、首片 16KB/s 约 15s，验 FRAG_LOADING 在飞信号）。  
+  清单在 `.tmp/hls-gen/` 按本轮端口现生成：分片必须写成**绝对地址**，才能给清单和  
   分片分别挂不同的限速参数（相对地址只会继承清单自己的 query，挂不到分片上）
 - `slow-serve.mjs` 按扩展名给 MIME（`.m3u8` / `.ts` / `.m4s`），不再一律 `video/mp4`
-- 场景失败时打印「判据时间线」（只打状态变化）：只看最终数字分不清是「证据没建立」
+- 场景失败时打印「判据时间线」（只打状态变化）：只看最终数字分不清是「证据没建立」  
   还是「证据建立了但续命没生效」，这一行能直接指出来
 
 ### 修复
 
-- 起播看门狗把 hls.js 的**重试次数**当成源站死了：`_netFail >= 3` 直接判死，绕过所有证据。
-  而弱网下一次卡顿就能让 hls 按 TTFB 超时自己重试、刷出 3 次以上 NETWORK_ERROR，请求
-  其实还挂着、数据也还在来。真机复现：清单 stall 13 秒 → 12.0s 弹「这个视频源播不了」，
-  13s hls 自己恢复、16.4s 正常出画，用户在中间 4 秒只看到一张错误卡片。
-  现在 `dead` 只看 `_lastHttpCode >= 400`；真拉不动由 hls 的 fatal 分支处理，
+- 起播看门狗把 hls.js 的**重试次数**当成源站死了：`_netFail >= 3` 直接判死，绕过所有证据。  
+  而弱网下一次卡顿就能让 hls 按 TTFB 超时自己重试、刷出 3 次以上 NETWORK_ERROR，请求  
+  其实还挂着、数据也还在来。真机复现：清单 stall 13 秒 → 12.0s 弹「这个视频源播不了」，  
+  13s hls 自己恢复、16.4s 正常出画，用户在中间 4 秒只看到一张错误卡片。  
+  现在 `dead` 只看 `_lastHttpCode >= 400`；真拉不动由 hls 的 fatal 分支处理，  
   看门狗这边还有弱证据 45s / 100s 与总上限 120s 兜底，不会无限等
 
 ### 测试
 
 - smoke 380→381：`netFail=5` + 清单在飞时仍要续命（重试次数不等于源站死了）
-- `slow-media-verify.mjs` 五个场景全过：steady 续命 3 次、stall 续命 2 次恢复播放、
+- `slow-media-verify.mjs` 五个场景全过：steady 续命 3 次、stall 续命 2 次恢复播放、  
   dead 47.2s 给结论、hls-manifest 续命 1 次后出画、hls-frag 续命 2 次后出画
 
 ## v0.1.75–v0.1.76 — 2026-11-10
 
 ### 新增
 
-- `scripts/slow-serve.mjs`：带背压的限速静态服务（`kbps=` 限速、`stallAfter`+`stallMs`
-  模拟 CDN 传输中途卡住、`VERBOSE=1` 每秒打实际吞吐）。慢资源现场在单测里造不出来，
-  必须真的让服务"慢慢发"和"发一半停住"；限速实现若没背压会一次性灌满缓冲区，
+- `scripts/slow-serve.mjs`：带背压的限速静态服务（`kbps=` 限速、`stallAfter`+`stallMs`  
+  模拟 CDN 传输中途卡住、`VERBOSE=1` 每秒打实际吞吐）。慢资源现场在单测里造不出来，  
+  必须真的让服务"慢慢发"和"发一半停住"；限速实现若没背压会一次性灌满缓冲区，  
   VERBOSE 那行就是为了当场发现这个假象
-- `scripts/slow-media-verify.mjs`：慢资源起播回归，起 `serve.mjs` + `slow-serve.mjs`
-  后在真实 Chrome 里逐 250ms 采样判据/续命/自救/DOM 文案，三个场景各自断言：
-  `steady`（8KB/s 慢但在下：不报错、续命、加载环改「网络较慢」）、`stall`（60KB 处停
-  18s：不报错、不重建、恢复后能播）、`dead`（只发 1 字节：35s 前不误报、最终仍给结论）。
+- `scripts/slow-media-verify.mjs`：慢资源起播回归，起 `serve.mjs` + `slow-serve.mjs`  
+  后在真实 Chrome 里逐 250ms 采样判据/续命/自救/DOM 文案，三个场景各自断言：  
+  `steady`（8KB/s 慢但在下：不报错、续命、加载环改「网络较慢」）、`stall`（60KB 处停  
+  18s：不报错、不重建、恢复后能播）、`dead`（只发 1 字节：35s 前不误报、最终仍给结论）。  
   `dead` 是反向保险——续命不能变成"永远等下去"
-- `test-all.mjs` 加第 ⑪ 阶段（约 2 分钟，`SCENARIOS=stall` 可只跑判死边界）；
+- `test-all.mjs` 加第 ⑪ 阶段（约 2 分钟，`SCENARIOS=stall` 可只跑判死边界）；  
   README 补「慢资源起播回归」一节与两个脚本的用法
 
 ### 变更
 
-- 错误卡片的触发条件在 README 改成按证据分档的写法：旧描述只写「12s 看门狗兜底」，
+- 错误卡片的触发条件在 README 改成按证据分档的写法：旧描述只写「12s 看门狗兜底」，  
   容易让人以为是固定 12 秒判死；实际现在是强证据等 120s、弱证据 45s/100s 两档
-- `startDiag()` 补 `httpCode` / `netFail`：判死走的是 dead 分支（HTTP>=400 / 连续失败）
+- `startDiag()` 补 `httpCode` / `netFail`：判死走的是 dead 分支（HTTP>=400 / 连续失败）  
   还是证据分支，光看 `flow` 分不出来，这两个字段就是给「为什么 12s 就弹了卡片」用的
 
 ## v0.1.75 — 2026-11-10
 
 ### 修复
 
-- 起播续命预算拆成两档：**一个字节都没来过**（`readyState=0`、没任何字节/元数据）
-  仍按 45s 判死，避免对「连接挂着但没数据」的假活无限等；**已经来过字节或元数据**
-  的按 100s 等（总上限仍 120s）。实测 4KB/s 拉 1MB mp4 一次 `progress` 都不发、
+- 起播续命预算拆成两档：**一个字节都没来过**（`readyState=0`、没任何字节/元数据）  
+  仍按 45s 判死，避免对「连接挂着但没数据」的假活无限等；**已经来过字节或元数据**  
+  的按 100s 等（总上限仍 120s）。实测 4KB/s 拉 1MB mp4 一次 `progress` 都不发、  
   元数据 40 秒才到、41 秒出画，用单一 45s 上限会把卡片正好弹在它马上要出画的时候
 
 ## v0.1.74 — 2026-11-10
 
 ### 新增
 
-- `serve.mjs` 加 `/__hls?u=<远程地址>` 镜像代理：清单与分片按 URL 缓存到 `.tmp/hlscache`，
-  清单里的相对地址改写成同样的代理地址。公网测试流（mux / test-videos）从国内拉一个
-  1080p 分片要 20s+，两臂都卡在网络上，量出来的只是 CDN 速度；镜像之后第一次慢、
+- `serve.mjs` 加 `/__hls?u=<远程地址>` 镜像代理：清单与分片按 URL 缓存到 `.tmp/hlscache`，  
+  清单里的相对地址改写成同样的代理地址。公网测试流（mux / test-videos）从国内拉一个  
+  1080p 分片要 20s+，两臂都卡在网络上，量出来的只是 CDN 速度；镜像之后第一次慢、  
   之后两臂都走 loopback，比的才是播放器本身
-- `e2e/open-ab-hls-android.html` + `mumu-open-ab.mjs` 的 `MODE=hls`：网页臂用
-  **插件内联的同一份 hls.js**（同一构建，本地服务提供）挂裸 `<video>`，插件臂走
-  `__vv.open(type=HLS)`，比同一个 m3u8 的起播与出画后帧间隔；`PHASE=churn` 时播放器
+- `e2e/open-ab-hls-android.html` + `mumu-open-ab.mjs` 的 `MODE=hls`：网页臂用  
+  **插件内联的同一份 hls.js**（同一构建，本地服务提供）挂裸 `<video>`，插件臂走  
+  `__vv.open(type=HLS)`，比同一个 m3u8 的起播与出画后帧间隔；`PHASE=churn` 时播放器  
   底下叠一层一直在动的元素（CSS 动画 + 每帧重绘的 canvas），模拟真实站点的弹幕/广告
-- 报告加里程碑拆解（`rs1/rs4`、`loadedmetadata/loadeddata/canplay/playing/waiting`），
+- 报告加里程碑拆解（`rs1/rs4`、`loadedmetadata/loadeddata/canplay/playing/waiting`），  
   一个 TTFF 数字分不出「卡在引擎缓冲」还是「卡在合成出画」
 
 ### 修复
 
-- 起播看门狗不再把「只是慢」判成「这个视频源播不了」。旧版 12 秒一到就下结论，
-  判据里「数据还在走」只有 hls 的 `_fragLoadingSince`/`_fragLoadedAt` 两条，
-  **直连 mp4 永远拿不到**，于是慢一点就被当成解码器被占满而销毁重建、从 0 重下。
-  新增 `vvNetFlow()` 统一判据：最近 6s 有字节到账算强证据（分片/清单下载完成、
-  mp4 的 progress 增长），请求还在飞（分片 <45s、清单 <30s、`networkState===2` 且无 error）
+- 起播看门狗不再把「只是慢」判成「这个视频源播不了」。旧版 12 秒一到就下结论，  
+  判据里「数据还在走」只有 hls 的 `_fragLoadingSince`/`_fragLoadedAt` 两条，  
+  **直连 mp4 永远拿不到**，于是慢一点就被当成解码器被占满而销毁重建、从 0 重下。  
+  新增 `vvNetFlow()` 统一判据：最近 6s 有字节到账算强证据（分片/清单下载完成、  
+  mp4 的 progress 增长），请求还在飞（分片 <45s、清单 <30s、`networkState===2` 且无 error）  
   算弱证据；命中就续命，不销毁、不报错
-- 续命期间保留加载进度环，文案改「网络较慢，仍在加载…」，没总长度时补「已下载 x」
+- 续命期间保留加载进度环，文案改「网络较慢，仍在加载…」，没总长度时补「已下载 x」  
   让用户看到数字在涨；旧行为是 `vvShowErr` 顺手 `vvHideLoading()`，进度环被错误卡顶掉
-- 预算改成「首判 12s + 每次续命 5~6s」：弱证据最多等 45s（连接挂着但一个字节不来
-  不能无限等），强证据一路等到总上限 120s；源站明说不行（`_lastHttpCode>=400` /
+- 预算改成「首判 12s + 每次续命 5~6s」：弱证据最多等 45s（连接挂着但一个字节不来  
+  不能无限等），强证据一路等到总上限 120s；源站明说不行（`_lastHttpCode>=400` /  
   `_netFail>=3`）立刻判死，不等
-- 解码器自救收紧：只有「数据确实不流了、且已拿到元数据」才走 `vvCodecRescue`；
-  慢资源不会再被当解码器故障自毁。真正的解码器问题仍由帧看门狗兜（它要求
+- 解码器自救收紧：只有「数据确实不流了、且已拿到元数据」才走 `vvCodecRescue`；  
+  慢资源不会再被当解码器故障自毁。真正的解码器问题仍由帧看门狗兜（它要求  
   `readyState>=3` 且 `totalVideoFrames===0`，不受慢网影响）
-- HLS 补「清单在飞」信号：监听 `MANIFEST_LOADING` / `LEVEL_LOADING` / `AUDIO_TRACK_LOADING`
-  与对应的 LOADED/ERROR，弱网下主清单跳子清单磨十几秒的时段也算数据在走；`vvHlsNudge`
+- HLS 补「清单在飞」信号：监听 `MANIFEST_LOADING` / `LEVEL_LOADING` / `AUDIO_TRACK_LOADING`  
+  与对应的 LOADED/ERROR，弱网下主清单跳子清单磨十几秒的时段也算数据在走；`vvHlsNudge`  
   在清单在飞时不再 `startLoad`（会打断在飞的清单请求）
-- 播放中 20s 卡顿提示也用同一套证据：mp4 慢速下载时 `readyState` 会在 2 停很久，
+- 播放中 20s 卡顿提示也用同一套证据：mp4 慢速下载时 `readyState` 会在 2 停很久，  
   那不是在卡，是在下，不该每 20s 弹一次「播放卡住」
 
 ### 测试
 
-- smoke 加 16 项：强/弱/无证据三档判定、慢资源续命不自救、无动静直接判死、
+- smoke 加 16 项：强/弱/无证据三档判定、慢资源续命不自救、无动静直接判死、  
   弱证据 45s 上限、强证据 120s 总上限、403 有字节也不等、数据不流时仍走自救
-- 真机 HLS 对照（MuMu + Via 7.3.3 / WebView 110，v0.1.73，480p 单档、分片已预热）：
-  页面静止 5 轮中位数——起播 网页 1249ms / 内置 1004ms，出画后帧间隔 17.1ms vs 17.3ms，
-  长帧率 2.3% vs 3.5%；页面在动 5 轮中位数——起播 1006ms vs 1162ms，帧间隔 17.6 vs 17.3ms，
+- 真机 HLS 对照（MuMu + Via 7.3.3 / WebView 110，v0.1.73，480p 单档、分片已预热）：  
+  页面静止 5 轮中位数——起播 网页 1249ms / 内置 1004ms，出画后帧间隔 17.1ms vs 17.3ms，  
+  长帧率 2.3% vs 3.5%；页面在动 5 轮中位数——起播 1006ms vs 1162ms，帧间隔 17.6 vs 17.3ms，  
   长帧率 4.1% vs 3.5%。两臂都在同一档噪声里，**内置播放器在 HLS 链路上也没有额外开销**
-- 里程碑拆解说明差异在哪：内置臂 `loadedmetadata`→`loadeddata` 比网页臂多 100–200ms
+- 里程碑拆解说明差异在哪：内置臂 `loadedmetadata`→`loadeddata` 比网页臂多 100–200ms  
   （多一次布局/合成），`waiting` 两者都在 20–60ms，引擎侧没有差别
 
 ## v0.1.72–v0.1.73 — 2026-11-10
 
 ### 修复
 
-- 上次看到结尾附近的视频，再点开会「闪一下就没了」：续播把 `currentTime` 跳到距结尾 0.1s 处，
-  立刻触发 `ended`，`vvOnEnded` 再 1.6s 后自己 `closePlayer()`。用户看到的是播放器打开又
-  自己关掉，很容易当成播放器坏了。新增 `vvResumeTarget(d, duration)` 统一算续播位置：
+- 上次看到结尾附近的视频，再点开会「闪一下就没了」：续播把 `currentTime` 跳到距结尾 0.1s 处，  
+  立刻触发 `ended`，`vvOnEnded` 再 1.6s 后自己 `closePlayer()`。用户看到的是播放器打开又  
+  自己关掉，很容易当成播放器坏了。新增 `vvResumeTarget(d, duration)` 统一算续播位置：  
   短片段（<60s）留最后 10%（至少 3s）、长片留最后 15s，落在这段里就当作看完了、从 0 开始
-- `vvSaveNow` 不再记录「已播完」的位置：`vvOnEnded` 虽然把记录清零了，但紧接着的 `pause`
+- `vvSaveNow` 不再记录「已播完」的位置：`vvOnEnded` 虽然把记录清零了，但紧接着的 `pause`  
   与 `closePlayer` 又会把 9.9s 写回去，上面那条于是能反复复现。加 `VID.ended` 判断，播完不记
-- 真机起播对照探针自身的两个测量 bug（量出来的 8~28 秒全是探针自己的错）：
-  ① 拿到 `.vv-player-video` 后没有立刻开始等首帧，而是空转到 500 次轮询结束（≈8s）才注册
-  `requestVideoFrameCallback`；② `close()` 之后残留的游离节点也会被 `querySelector` 命中，
-  它的 `loadeddata` 正常触发但永远不出帧（不在渲染树里），必须限定「在文档内且属于
+- 真机起播对照探针自身的两个测量 bug（量出来的 8~28 秒全是探针自己的错）：  
+  ① 拿到 `.vv-player-video` 后没有立刻开始等首帧，而是空转到 500 次轮询结束（≈8s）才注册  
+  `requestVideoFrameCallback`；② `close()` 之后残留的游离节点也会被 `querySelector` 命中，  
+  它的 `loadeddata` 正常触发但永远不出帧（不在渲染树里），必须限定「在文档内且属于  
   `#vv-player-root`」
 
 ### 新增
 
-- `e2e/open-ab-android.html` + `scripts/mumu-open-ab.mjs`：同一路 mp4，页面原生 `<video>`
-  与内置播放器各播一遍，对比「点下去到出第一帧」和出画后 3s 的 rAF 帧间隔。每个臂用独立
-  URL 保证冷起播（顺带避开续播位置），两轮交替顺序抵消下载先后偏差。加 `MODE=resume`
+- `e2e/open-ab-android.html` + `scripts/mumu-open-ab.mjs`：同一路 mp4，页面原生 `<video>`  
+  与内置播放器各播一遍，对比「点下去到出第一帧」和出画后 3s 的 rAF 帧间隔。每个臂用独立  
+  URL 保证冷起播（顺带避开续播位置），两轮交替顺序抵消下载先后偏差。加 `MODE=resume`  
   只跑「看完再打开同一个视频」的复核
-- smoke 新增 9 条断言：续播位置该不该跳（长片/短片/无记录/时长未知），以及播完不再把
+- smoke 新增 9 条断言：续播位置该不该跳（长片/短片/无记录/时长未知），以及播完不再把  
   结尾位置写回记录
 
 ### 测试
 
-- 真机（MuMu + Via 7.3.3 / WebView 110，v0.1.72）：1080p 5MB 素材、每臂冷起播，
-  起播首帧原生 1656ms / 内置播放器 1364ms，两者解出同为 1920×1080，出画后帧间隔
+- 真机（MuMu + Via 7.3.3 / WebView 110，v0.1.72）：1080p 5MB 素材、每臂冷起播，  
+  起播首帧原生 1656ms / 内置播放器 1364ms，两者解出同为 1920×1080，出画后帧间隔  
   17.3ms vs 17.1ms、长帧率 3.3% vs 2.6%——**内置播放器在这条链路上没有额外开销**
-- 真机复核续播修复（v0.1.73）：同一 URL 连开两次，第一遍播完播放器自己关掉；
+- 真机复核续播修复（v0.1.73）：同一 URL 连开两次，第一遍播完播放器自己关掉；  
   第二遍 3.2s 后仍在播放、位置 2.96s / 时长 10s，从头开始
 
 ## v0.1.69–v0.1.71 — 2026-11-10
 
 ### 修复
 
-- 收起页面媒体改用自己的清单 `VV_PRELOAD_HELD`，不再往 `VV._pageMedia` 里塞。上一版借用
-  续播清单导致同一元素被重复记账：`vvPausePageMedia` 的去重判断看到"已有记录"就跳过，
-  于是播放器打开时页面正在播的视频**根本没被暂停**，关闭后也不会自动续播（UI 矩阵两条
-  断言直接挂掉）。两条链路语义本就不同：`_pageMedia` 是"我暂停的、关掉要续播"，
+- 收起页面媒体改用自己的清单 `VV_PRELOAD_HELD`，不再往 `VV._pageMedia` 里塞。上一版借用  
+  续播清单导致同一元素被重复记账：`vvPausePageMedia` 的去重判断看到"已有记录"就跳过，  
+  于是播放器打开时页面正在播的视频**根本没被暂停**，关闭后也不会自动续播（UI 矩阵两条  
+  断言直接挂掉）。两条链路语义本就不同：`_pageMedia` 是"我暂停的、关掉要续播"，  
   `VV_PRELOAD_HELD` 是"我收起来省带宽的、关掉只装回 src 不自动播"
-- 「是不是在播」的判定改成 `paused === false`：个别壳里 `paused` 可能是 undefined，
+- 「是不是在播」的判定改成 `paused === false`：个别壳里 `paused` 可能是 undefined，  
   用 `!el.paused` 会把没在播的媒体误判成在播、整条跳过（这次 self-check 就是这么漏的）
-- 装回被收起的媒体用 `setAttribute('src', …)` 而不是 `el.src = …`，和站点自己写 src 的
-  方式一致；同时清掉 `__vvUsMuted/__vvMuted/__vvVol` 三个临时标记，避免声音自愈巡检
+- 装回被收起的媒体用 `setAttribute('src', …)` 而不是 `el.src = …`，和站点自己写 src 的  
+  方式一致；同时清掉 `__vvUsMuted/__vvMuted/__vvVol` 三个临时标记，避免声音自愈巡检  
   把已经装回去的媒体再当成"我们压下的静音"处理
 
 ### 测试
 
-- `ui-verify` 段 O（关闭播放器 / 恢复页面媒体）先关掉上一段遗留的播放器再播页面视频：
-  播放器开着时页面媒体是被有意收起的（没有 src），此时 `play()` 不会有结果，
-  原用例会挂在 `await v.play()` 上，表现为 CDP protocol timeout、看不出是哪一步。
+- `ui-verify` 段 O（关闭播放器 / 恢复页面媒体）先关掉上一段遗留的播放器再播页面视频：  
+  播放器开着时页面媒体是被有意收起的（没有 src），此时 `play()` 不会有结果，  
+  原用例会挂在 `await v.play()` 上，表现为 CDP protocol timeout、看不出是哪一步。  
   另外给这一步的 `play()` 加了 3s 超时兜底，并输出 `preO` 现场（src / readyState / paused）
 
 ## v0.1.67–v0.1.68 — 2026-11-10
 
 ### 修复
 
-- 上一版只压 `preload="none"` 解决不了「页面播放器暂停后还在预载」：属性改完浏览器仍会
-  重新发起一次元数据请求，缓冲还在继续长（真浏览器实测 `networkState` 又回到 2 LOADING）。
-  改成对非 blob 的页面媒体整条收起（`vvDetachMedia`：pause + 摘 src + `load()`），
-  位置/静音/暂停态记进 `VV._pageMedia`，关闭播放器时由 `vvResumePageMedia` 按原样装回去，
+- 上一版只压 `preload="none"` 解决不了「页面播放器暂停后还在预载」：属性改完浏览器仍会  
+  重新发起一次元数据请求，缓冲还在继续长（真浏览器实测 `networkState` 又回到 2 LOADING）。  
+  改成对非 blob 的页面媒体整条收起（`vvDetachMedia`：pause + 摘 src + `load()`），  
+  位置/静音/暂停态记进 `VV._pageMedia`，关闭播放器时由 `vvResumePageMedia` 按原样装回去，  
   且记成 paused 不会被自动起播。实测 `networkState` 由 2 LOADING 变 0 EMPTY，下载真的停了
-- `blob:`/MSE 的页面媒体不能摘：摘了站点那条 MediaSource 就 closed，关掉播放器也装不回来。
+- `blob:`/MSE 的页面媒体不能摘：摘了站点那条 MediaSource 就 closed，关掉播放器也装不回来。  
   这类仍然只压 `preload`
 - `vvDetachMedia` 调用次数计入 `__vv.preloadState().aborts`，便于真机确认到底收起了几条
 
@@ -217,34 +246,35 @@
 
 ### 修复
 
-- 用内置播放器播放时，页面自己的播放器只「暂停」不再等于「停掉」：`<video>` 暂停后
-  `preload` 仍然有效，站点普遍写 `preload="auto"`，暂停只是停了解码、分片还在继续下载，
-  弱网/移动数据下等于跟我们的首片抢带宽。新增 `vvStopPagePreload`：打开播放器时把页面
-  媒体的 `preload` 按成 `none`，还没播过的（`currentTime≈0`）再 `load()` 把在飞的下载
+- 用内置播放器播放时，页面自己的播放器只「暂停」不再等于「停掉」：`<video>` 暂停后  
+  `preload` 仍然有效，站点普遍写 `preload="auto"`，暂停只是停了解码、分片还在继续下载，  
+  弱网/移动数据下等于跟我们的首片抢带宽。新增 `vvStopPagePreload`：打开播放器时把页面  
+  媒体的 `preload` 按成 `none`，还没播过的（`currentTime≈0`）再 `load()` 把在飞的下载  
   直接中止（后续版本发现这样仍会重发请求，改为整条收起，见「未发布」）
-- 播放期间每 3s 补扫一次：站点会在播放时新建广告位、预载下一集，只在打开那一刻扫一遍
+- 播放期间每 3s 补扫一次：站点会在播放时新建广告位、预载下一集，只在打开那一刻扫一遍  
   会漏。关播放器时停扫并把 `preload` 原样还回去（`vvRestorePagePreload`）
-- `12-autoplay.js` 的手势还原不再在播放器开着时执行：用户点一下页面就把 `preload`
+- `12-autoplay.js` 的手势还原不再在播放器开着时执行：用户点一下页面就把 `preload`  
   还原成 `auto`，等于刚按住又被放开。改成播放器关闭时强制还原（`vvApRestorePreload(true)`）
 
 ### 新增
 
-- `__vv.preloadState()` / `__vv.stopPagePreload()`：按住几条页面媒体、守卫是否在跑、
+- `__vv.preloadState()` / `__vv.stopPagePreload()`：按住几条页面媒体、守卫是否在跑、  
   当前还有几条在拉流，真机上排查「谁在偷偷下载」看这几个数
 
 ## v0.1.65 — 2026-11-10
 
 ### 修复
 
-- 起播看门狗不再把「网络慢但数据在走」误判成「解码器抢不到」：1080P 站点一片常见
-  2～6MB，弱网下 12s 拿不到完整首片很常见，原来一律按解码器不足处理——销毁 hls 再从零
-  重下，用户看到的是空转十几秒，而且每轮重下都从头开始，表现就是「插件起播比网页慢一大截」。
-  现在分片正在下载、或 10s 内刚下到过分片时，看门狗只放宽时限（最多两次，合计约 36s），
+- 起播看门狗不再把「网络慢但数据在走」误判成「解码器抢不到」：1080P 站点一片常见  
+  2～6MB，弱网下 12s 拿不到完整首片很常见，原来一律按解码器不足处理——销毁 hls 再从零  
+  重下，用户看到的是空转十几秒，而且每轮重下都从头开始，表现就是「插件起播比网页慢一大截」。  
+  现在分片正在下载、或 10s 内刚下到过分片时，看门狗只放宽时限（最多两次，合计约 36s），  
   真正没有数据流动时才走解码器自救
-- 帧看门狗的判据收紧：原来「3.2s 没有 advance 且 `readyState>=2`」就重建，而
-  `HAVE_CURRENT_DATA` 时解码器可能还在初始化，一重建就把刚拿到的分片丢掉。现在要求
-  `readyState>=3` 且 `getVideoPlaybackQuality().totalVideoFrames === 0`（真的一帧都没解出来）
+- 帧看门狗的判据收紧：原来「3.2s 没有 advance 且 `readyState>=2`」就重建，而  
+  `HAVE_CURRENT_DATA` 时解码器可能还在初始化，一重建就把刚拿到的分片丢掉。现在要求  
+  `readyState>=3` 且 `getVideoPlaybackQuality().totalVideoFrames === 0`（真的一帧都没解出来）  
   才判定解码器没拿到；已经解出帧但 `currentTime` 还没跨过阈值的，交给起播看门狗兜底
+
 
 ### 测试
 

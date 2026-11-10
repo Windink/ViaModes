@@ -1396,6 +1396,14 @@ function vvLoadMedia(item) {
                             VV.active.audioIndex = typeof inst.audioTrack === 'number' ? inst.audioTrack : 0;
                             vvUpdateSpeedChip();
                         }
+                        // 续播：清单解析完就直接从目标位置拉分片。
+                        // 等 loadedmetadata 再 seek 的话，hls 已经把 0s 附近那片下完了，
+                        // 用户要为"下一片再 flush 一次"多等 0.7 秒左右（真机实测）。
+                        var es = vvEarlyStart();
+                        if (es.t > 5) {
+                            try { inst.startLoad(es.t); } catch (eES) {}
+                            try { VV.active._earlyT = es.t; } catch (eES2) {}
+                        }
                     } catch (eQ) {}
                 });
                 if (hlsEv.LEVEL_SWITCHED) inst.on(hlsEv.LEVEL_SWITCHED, function (eL, dataL) {
@@ -1556,12 +1564,19 @@ function vvLoadMedia(item) {
         });
         return;
     }
-    vvAttachDirect(url, item.type === 'BLOB');
+    vvAttachDirect(url, item.type === 'BLOB', item.type === 'HLS' ? 0 : vvEarlyStart().t);
 }
 
-function vvAttachDirect(url, isBlob) {
+function vvAttachDirect(url, isBlob, startT) {
     try {
-        VID.src = url;
+        var src = url;
+        // 只有渐进式直链能用媒体片段把起点带上；blob（页面自己的 MSE 句柄）和
+        // m3u8（原生 HLS 是否认 #t= 各机型不一致）都老实用 seek 的方式。
+        if (!isBlob && startT > 5) {
+            src = vvWithStartFragment(url, startT);
+            if (VV.active) { VV.active._srcFrag = 1; VV.active._earlyT = startT; }
+        }
+        VID.src = src;
         VID.load();
         VID.play().catch(function () {
             if (isBlob) vvToast('原生流可能已失效，建议退回网页内播放', true);
@@ -1758,25 +1773,53 @@ function vvResumeTarget(d, duration) {
     return t;
 }
 
+// 起播该落在哪儿：续播位置与「跳过片头」取更靠后的那个。
+// 以前是"先 seek 到续播位置、再看要不要跳片头"，一次打开连做两次 seek；
+// 合成一个目标位后，起播阶段就能一次落位（直连用 #t=、hls 用 startLoad(t)）。
+// duration 还没拿到时传 0，就用续播记录里存的那份时长（回来改判用）。
+function vvStartTarget(d, duration, skipS) {
+    var dur = (duration && isFinite(duration)) ? duration : ((d && d.d && isFinite(d.d)) ? d.d : 0);
+    var maxT = dur ? Math.max(0, dur - 0.1) : 0;
+    var t = vvResumeTarget(d, dur);
+    var sk = (skipS && skipS > 2) ? (maxT ? Math.min(skipS, maxT) : skipS) : 0;
+    if (sk && (!t || t < sk)) return { t: sk, why: 'skip' };
+    return { t: t, why: t ? 'resume' : '' };
+}
+
+// 元数据还没到时的起点：能提前落位就不用"先下 0s 附近、再 seek 过去"，
+// 这一次 seek 在真机上要 0.5~1.1 秒（见 README「续播起播耗时」）。
+function vvEarlyStart() {
+    var act = VV.active;
+    if (!act || act._noEarly) return { t: 0, why: '' };
+    return vvStartTarget(act.resumeInfo, act.resumeInfo && act.resumeInfo.d, act.skipS);
+}
+
+// 把起点写成媒体片段（mp4 直链）：浏览器第一个 Range 就从这里要数据。
+// 已有片段（#t=40 / #xywh=…）时替换或续写，别拼出两个 #。
+function vvWithStartFragment(url, t) {
+    var s = Math.round(t * 100) / 100;
+    var i = url.indexOf('#');
+    var base = i < 0 ? url : url.slice(0, i);
+    var frag = i < 0 ? '' : url.slice(i + 1);
+    if (/(^|&)t=/.test(frag)) frag = frag.replace(/(^|&)t=[^&]*/, '$1t=' + s);
+    else frag = frag ? frag + '&t=' + s : 't=' + s;
+    return base + '#' + frag;
+}
+
 function vvBindVideo() {
     VID.addEventListener('loadedmetadata', function () {
         try {
-            if (VV.active) VV.active._netAt = Date.now();
+            if (VV.active) { VV.active._netAt = Date.now(); VV.active._sawMeta = 1; }
             var d = VV.active && VV.active.resumeInfo;
             var dur = (VID.duration && isFinite(VID.duration)) ? VID.duration : 0;
-            var maxT = dur ? Math.max(0, dur - 0.1) : 0;
-            var resumeT = vvResumeTarget(d, dur);
-            if (resumeT > 5 && Math.abs(VID.currentTime - resumeT) > 3) {
-                VID.currentTime = resumeT;
+            var target = vvStartTarget(d, dur, VV.active && VV.active.skipS);
+            // 起播时已经落过位（直连的 #t=、hls 的 startLoad(t)）就基本不用再 seek；
+            // 差 3 秒以上才纠正，避免每次打开都白多一次 seek
+            if (target.t > 2 && Math.abs(VID.currentTime - target.t) > 3) {
+                VID.currentTime = target.t;
                 // HLS 续播时让 hls.js 直接从目标位置拉流，避免只 seek 不加载而卡住
-                try { if (VV.active.hls) VV.active.hls.startLoad(resumeT); } catch (eH) {}
-                vvToast('已回到上次位置 ' + vvFmtTime(resumeT));
-            }
-            if (VV.active.skipS > 2 && VID.currentTime < VV.active.skipS) {
-                var skipT = maxT ? Math.min(VV.active.skipS, maxT) : VV.active.skipS;
-                VID.currentTime = skipT;
-                try { if (VV.active.hls) VV.active.hls.startLoad(skipT); } catch (eS) {}
-                vvToast('已跳过片头');
+                try { if (VV.active.hls) VV.active.hls.startLoad(target.t); } catch (eH) {}
+                vvToast(target.why === 'skip' ? '已跳过片头' : ('已回到上次位置 ' + vvFmtTime(target.t)));
             }
             try { if (DUREL) DUREL.textContent = vvFmtTime(VID.duration); } catch (eD) {}
             try { VID.playbackRate = VV.active.speed || 1; } catch (eR) {}
@@ -1866,6 +1909,15 @@ function vvBindVideo() {
         if (act && act.item && act.item.type === 'HLS' && act._nativeTried && !act.hls && !act._nativeFailed && vvHasMseHls()) {
             act._nativeFailed = true;
             vvToast('系统 HLS 播放失败，改用 hls.js', true);
+            vvLoadMedia(act.item);
+            return;
+        }
+        // #t= 起点被个别源判成打不开（不支持 Range、或反代把片段当路径）：
+        // 还没出过画面时退回不带片段的地址重来一次。已经出过画面的不能这么重试——
+        // 那会把用户直接丢回片头。
+        if (act && act._srcFrag && !act._srcFragFailed && !act._sawMeta && act.item) {
+            act._srcFragFailed = true;
+            act._noEarly = true;
             vvLoadMedia(act.item);
             return;
         }

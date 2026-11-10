@@ -756,6 +756,33 @@ HLS 的两条用 `e2e/media/hls/*.ts` 当分片（各 10s，来自 mux 的公开
 WebView 110，v0.1.77）19 项全过：`dead` 47.2s 才给结论，其余四个不弹卡片并最终出画。
 `SCENARIOS=steady,dead` 可只跑单项，`LIMIT=<秒>` 改总超时。
 
+### 续播起播耗时（`node scripts/mumu-resume.mjs`）
+
+「上次看到一半点开」这条路径以前是：先把 0s 附近的片子下出来 → 拿到元数据 → seek 到目标位。
+这一次 seek 在真机上要 0.5~1.2 秒，而用户看到的只是加载圈多转一圈。
+
+现在的做法是**起播阶段就把位置带上**：直连 mp4 用媒体片段 `#t=<秒>`（浏览器第一个 Range
+就从目标位置取数据），HLS 在 `MANIFEST_PARSED` 时 `startLoad(t)`（直接拉目标位置的分片）；
+同时把「续播位置」和「跳过片头」合成一个起播目标（`vvStartTarget`），只落位一次而不是两次。
+起点靠媒体片段带过去的前提是源支持 Range，万一被当成打不开（还没出过画面）会退回不带片段的
+地址重来一次；已经出过画面的不这么重试，那会把用户丢回片头。
+
+量法：先播到设定秒数关掉（写下续播位置），再打开同一个**已缓存**文件，记录
+metadata / seeking / seeked / playing 的时间点，重复 N 轮取中位数。`SAVE=1` 存基线，
+之后再跑就直接打印差值。两个坑都写在脚本里：同一场景的 URL 必须跨轮稳定（续播记录按 URL 存），
+每量完一轮要把位置摆回预置点（否则 currentTime 每轮往后走，几轮就漂进「快看完了」的尾巴区，
+续播被主动放弃，量出来是冷起播）。
+
+真机（MuMu / Via 7.3.3 / WebView 110，3 轮中位数，同素材同预置位置只换版本）：
+
+| 场景 | 改前 | 改后 |
+| --- | --- | --- |
+| 直连 mp4（10s / 720p，续播 6.5s） | 首帧 1303ms，metadata 后 seeked +1203ms | 首帧 993~1041ms，seeked +917ms |
+| HLS（20s，续播 8s） | 首帧 1011ms | 首帧 762~937ms（波动大，机制同一笔账） |
+
+残留的 ~0.9s 是这台模拟器「起解码管线 + 跳到非关键帧位置」的固有成本，不是 seek 逻辑的问题；
+再往下抠只能牺牲「续播」本身（从头播）。
+
 ## 已知限制（同油猴生态的共性）
 
 | 限制 | 说明 |
@@ -805,6 +832,7 @@ scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网�
 scripts/slow-serve.mjs  限速静态服务（`kbps=` 限速 / `stallAfter`+`stallMs` 模拟 CDN 卡住，带背压；复现弱网现场用）
 scripts/slow-media-verify.mjs  慢资源起播回归（slow/stall/dead 三场景：慢不误判、卡顿不重建、假活仍会给结论）
 scripts/mumu-slow.mjs  慢资源起播 · 真机对照（MuMu + Via，五场景页内自驱动；含两端口映射与限速服务）
+scripts/mumu-resume.mjs  续播起播耗时 · 真机测量（MuMu + Via，N 轮取中位数，`SAVE=1` 存基线后自动出对比）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/perf-playback.mjs  桌面播放态帧间隔基准（解除 headless 60Hz 节流 + 动态底层像素，对比无菜单 / 默认低特效 / 强制毛玻璃）
 scripts/mumu-perf-play.mjs  播放态模糊层真机帧率探针（MuMu + Via，60Hz 下 >25ms 判跳帧，三场景各 4s × 2 轮）
@@ -818,6 +846,7 @@ e2e/episodes-android.html  选集真机自驱动测试台：同一套素材，�
 e2e/pip-share-android.html  小窗 / 导出浮层真机自驱动测试台：页内跑 40 项断言并 POST 上报（含 TouchEvent 拖动模拟与跨巡检窗口）
 e2e/perf-play-android.html  播放态模糊层真机探针：页内 rAF 采样，无菜单 / 默认低特效 / 强制毛玻璃三场景各 4s × 2 轮上报帧间隔
 e2e/slow-android.html  慢资源起播真机测试台：五个限速场景逐个 drive `__vv.open`，每 300ms 采样判据/续命/错误卡并上报，失败带时间线
+e2e/resume-android.html  续播起播耗时真机测试台：播到设定秒数关掉再打开，记 metadata/seeking/seeked/playing 时间点，多轮取中位数
 e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产物写在 e2e/local/，不入库）
 ```
 
