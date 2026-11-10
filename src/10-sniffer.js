@@ -193,6 +193,14 @@ function vvCheckMediaNode(n) {
         else u = n.getAttribute('href') || '';
         if (!u) return;
         var r = vvResolve(u, '');
+        // 顺手记下封面：起播等待期要用它顶住黑屏（见 vvShowPoster）。
+        // 只取 video 自己的 poster，别去猜站点结构。
+        if (r && tag === 'video') {
+            try {
+                var ps = n.getAttribute('poster') || '';
+                if (ps) r.poster = ps;
+            } catch (eP) {}
+        }
         if (r && vvPushItem(r) && tag === 'video' && n.currentSrc && n.currentSrc.indexOf('blob:') === 0) {
             vvPushItem(vvResolve(n.currentSrc, ''));
         }

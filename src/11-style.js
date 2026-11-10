@@ -107,6 +107,12 @@ var VV_CSS = `
    否则站点给 video 加的圆角、滤镜、内边距都会渗进来 */
 .vv-player-video { all: initial; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; background: #000; }
 .vv-bright { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 140; }
+/* 起播等待期的封面：铺满 + 轻微模糊，既盖住"还没出画"的黑屏，又不会被当成已经播起来了 */
+.vv-poster { position: absolute; inset: 0; z-index: 130; opacity: 0; pointer-events: none;
+  background-position: 50% 50%; background-size: cover; background-repeat: no-repeat;
+  filter: blur(16px) saturate(.85) brightness(.6); transform: scale(1.06);
+  transition: opacity .28s var(--vv-ease); }
+.vv-poster.on { opacity: 1; }
 
 /* ---- 页内悬浮小窗：系统画中画不可用时的降级 ----
    Via 这类 WebView 里 document.pictureInPictureEnabled 为 false，
@@ -313,6 +319,8 @@ var VV_CSS = `
 .vv-player-root.vv-lowfx .vv-sheet { background: rgba(18,19,26,.96); }
 .vv-player-root.vv-lowfx .vv-loading,
 .vv-player-root.vv-lowfx .vv-err { background: rgba(18,19,26,.94); }
+/* 静态封面上的模糊也是每帧重采样：低特效下不模糊，只压暗，观感差异很小 */
+.vv-player-root.vv-lowfx .vv-poster { filter: brightness(.55) saturate(.9); transform: none; }
 .vv-switch { position: relative; flex: 0 0 auto; width: 38px; height: 22px; border-radius: 11px; background: rgba(255,255,255,.16); transition: background .18s var(--vv-ease); }
 .vv-switch::after { content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .18s var(--vv-ease); }
 .vv-sheet-item.on .vv-switch { background: var(--vv-accent); }

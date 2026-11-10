@@ -783,6 +783,35 @@ metadata / seeking / seeked / playing 的时间点，重复 N 轮取中位数。
 残留的 ~0.9s 是这台模拟器「起解码管线 + 跳到非关键帧位置」的固有成本，不是 seek 逻辑的问题；
 再往下抠只能牺牲「续播」本身（从头播）。
 
+### 起播封面与加载 ETA（`node scripts/mumu-loading.mjs`）
+
+起播等待期画面本来是纯黑，用户不知道是在加载还是已经卡死。两件事：
+
+- **封面顶替**：三级来源（条目自带 `poster` → 页面里面积最大的 `video[poster]` → `og:image`），
+  拿不到就**不显示**——宁可纯黑，也不自己造一块颜色冒充封面。`playing` 时摘掉、出错时也摘。
+  低特效模式（`vv-lowfx`）下封面不走 `blur`：那是一层全屏重采样，在慢机上比「黑屏 200ms」更亏。
+- **加载 ETA**：慢网下「已缓冲 1.0s → 1.1s」这种数字在涨，仍不足以判断要不要继续等，
+  得给个「约 Ns」。口径是**还要多久够播**（目标 1.5s），三条取信路径：
+  ① 直链有总大小与时长时，算「够播那点数据」还差多少字节（不是整段下完，差十倍）；
+  ② 其余退回缓冲增长速度；③ HLS 退回「分片吞吐 ÷ 当前档码率」。
+  算不准就不写，`>180s` 也不写。
+
+真机上这套有三个坑，都不是靠桌面能发现的：
+
+| 坑 | 现象 | 结论 |
+| --- | --- | --- |
+| 这一版 hls.js 没有 `FRAG_LOAD_PROGRESS` 事件 | 按事件挂监听 `nProg=0`，首片 18s 内明细全空 | `vendor/hls.light.min.js` 里连事件名都搜不到。改成 `FRAG_LOADING` 留住当前分片、借加载层已有的 300ms 轮询读 `frag.stats` |
+| 分片没下完时按「够 1.5s 缓冲」换算 | 算出「约 2s」，实际要等 15s | 起播阶段改按**本片剩余字节 ÷ 瞬时吞吐**；播过一帧或已下完一片就切回原路径 |
+| 全程平均速度 | 首片实际 15s，算出「约 22~32s」，起播那刻还写着「约 13s」 | 改用最近采样窗口的瞬时速度（250ms 窗口、0.5/0.5 平滑） |
+
+真机实测（MuMu / Via 7.3.3 / WebView 110，HLS 首片 245KB 限速 16KB/s）：ETA 从「约 15~22s」
+单调递减到「约 2~4s」，首帧落在 16.4~16.6s，首帧那一刻明细已经切成「15 KB/s · 已缓冲 9.9s」
+——即 ETA 在首片就绪时撤走，不留误导性的尾数。`mumu-loading.mjs` 16 项全过。
+
+直连 mp4 在 Android 上拿不到字节数（`_total/_loaded` 恒 0，只剩缓冲增速 ≈1.75 秒/秒），
+而 mp4 一跳到 1.0s 缓冲离够播只差零点几秒，算出来 <1s 被阈值过滤——**不写才是对的**，
+所以 mp4 场景的真机断言只守「要么不写、要么是合法格式」。
+
 ## 已知限制（同油猴生态的共性）
 
 | 限制 | 说明 |
@@ -818,7 +847,7 @@ src/
 vendor/hls.light.min.js   构建时内联（网络不可达时自动降级为 CDN 懒加载）
 build.mjs        合并 → dist/via-video-player.user.js → node --check
 CHANGELOG.md     逐版本变更记录（「未发布」段由 build.mjs 自动定版）
-scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动/选集识别与分组/页内小窗状态机/系统画中画降级/置顶巡检避让/播放态低特效/时间文案与进度条写入节流 331 项断言）
+scripts/smoke.mjs  Node vm 烟雾测试（解析/推流/HLS 过滤/列表排序/进度 key/标题/seek/配置/外链导出/播放登记表/标签页休眠/跨页协调/关标签页清理/独占模式/后台禁装源/静音还原/长任务不误判后台/卸载只释放一轮/网页铺满状态机与还原/目标选取兜底/不锁滚动/选集识别与分组/页内小窗状态机/系统画中画降级/置顶巡检避让/播放态低特效/时间文案与进度条写入节流/起播落位/加载 ETA 412 项断言）
 scripts/serve.mjs  E2E 静态服务器（含 mp4/m3u8 MIME 与 Range；`?noRange=1` 模拟不可跳转；`/guard/*` 强制 Referer）
 scripts/e2e-verify.mjs  无头 Chrome 真实链路验证（起服务器→嗅探→播放→seek→切档→诊断→外链自检，48 项）
 scripts/ui-verify.mjs  UI/交互层功能矩阵（真实 Touch/Mouse 事件：手势/倍速/画质/锁屏/菜单交互/进度记忆/加载进度/失败卡片，98 项）
@@ -833,6 +862,7 @@ scripts/slow-serve.mjs  限速静态服务（`kbps=` 限速 / `stallAfter`+`stal
 scripts/slow-media-verify.mjs  慢资源起播回归（slow/stall/dead 三场景：慢不误判、卡顿不重建、假活仍会给结论）
 scripts/mumu-slow.mjs  慢资源起播 · 真机对照（MuMu + Via，五场景页内自驱动；含两端口映射与限速服务）
 scripts/mumu-resume.mjs  续播起播耗时 · 真机测量（MuMu + Via，N 轮取中位数，`SAVE=1` 存基线后自动出对比）
+scripts/mumu-loading.mjs  起播封面 + 加载 ETA · 真机验证（MuMu + Via，6 场景页内自驱动；含 HLS 慢分片清单现生成、XHR 增量进度探针，16 项）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/perf-playback.mjs  桌面播放态帧间隔基准（解除 headless 60Hz 节流 + 动态底层像素，对比无菜单 / 默认低特效 / 强制毛玻璃）
 scripts/mumu-perf-play.mjs  播放态模糊层真机帧率探针（MuMu + Via，60Hz 下 >25ms 判跳帧，三场景各 4s × 2 轮）
@@ -847,12 +877,14 @@ e2e/pip-share-android.html  小窗 / 导出浮层真机自驱动测试台：页�
 e2e/perf-play-android.html  播放态模糊层真机探针：页内 rAF 采样，无菜单 / 默认低特效 / 强制毛玻璃三场景各 4s × 2 轮上报帧间隔
 e2e/slow-android.html  慢资源起播真机测试台：五个限速场景逐个 drive `__vv.open`，每 300ms 采样判据/续命/错误卡并上报，失败带时间线
 e2e/resume-android.html  续播起播耗时真机测试台：播到设定秒数关掉再打开，记 metadata/seeking/seeked/playing 时间点，多轮取中位数
+e2e/loading-android.html  起播封面 + 加载 ETA 真机测试台：条目封面/页面封面/无封面/慢网 mp4/慢网 HLS/XHR 进度六场景，含低特效不 blur 与 ETA 量级断言
+e2e/poster-a.svg / poster-b.svg  封面测试素材（SVG，避免多引一张位图）
 e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产物写在 e2e/local/，不入库）
 ```
 
 ```
 node build.mjs            # 构建并语法校验
-node scripts/smoke.mjs    # 烟雾测试（331 项）
+node scripts/smoke.mjs    # 烟雾测试（412 项）
 node scripts/e2e-verify.mjs   # 无头 Chrome 真机链路验证（需 puppeteer-core）
 node scripts/ui-verify.mjs    # UI 交互功能矩阵（98 项）
 node scripts/audio-check.mjs  # 声音专项回归（含真实标签切换，22 项）

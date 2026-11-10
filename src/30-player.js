@@ -395,6 +395,7 @@ var ROOT = null, VID = null, BRIGHT = null, TOPBAR = null, BOTBAR = null, CBTN =
     CSPLAY = null, CSTIME = null, CSPROG = null, CSBUF = null, CSCUR = null,
     CSPROGDOT = null, LOCKMARK = null, SEEKTIP = null, GESTIP = null,
     LOADING = null, LOADBAR = null, LOADFILL = null, ERRBOX = null,
+    POSTER = null,
     MINIBAR = null, MINIDRAG = null,
     // 时长元素与当前秒文案缓存：timeupdate 约 4Hz，原来每次都 getElementById('vv-dur')
     // 并用 innerHTML 重建文本节点；文案按秒变化，缓存后绝大多数回调可以直接跳过。
@@ -482,6 +483,9 @@ function vvEnsurePlayerRoot() {
         try { vvShowCS(); } catch (eS) {}
     });
     BRIGHT = vvEl('div', 'vv-bright');
+    // 起播等待期的封面顶替：解码管线起来之前画面是纯黑，先把页面自己的封面铺上去，
+    // 用户看到的是"画面已经在了，只是在转圈"。首帧一到就摘掉。
+    POSTER = vvEl('div', 'vv-poster');
     LOADING = vvEl('div', 'vv-loading');
     LOADING.innerHTML =
         '<div class="vv-lr">' +
@@ -649,6 +653,7 @@ function vvEnsurePlayerRoot() {
     sheet.id = 'vv-sheet';
 
     ROOT.appendChild(VID);
+    ROOT.appendChild(POSTER);
     ROOT.appendChild(BRIGHT);
     ROOT.appendChild(LOADBAR);
     ROOT.appendChild(LOADING);
@@ -707,8 +712,51 @@ function vvSetTitle(s) {
     try { document.getElementById('vv-title').innerHTML = vvEscape(s); } catch (e) {}
 }
 
-function vvShowLoading(text) {
+// ---- 起播等待期的封面顶替 ----
+// 解码管线起来之前画面是纯黑；有封面就先铺上去，用户看到的是"画面已经在了，只是在转圈"。
+// 封面来源只用三处，拿不到就不显示——自己造个色块顶上去比黑屏更像"加载失败"：
+// 条目自带（嗅探时记的 video[poster]）→ 页面里面积最大的 video[poster] → og:image。
+function vvPickPoster(item) {
     try {
+        if (item && item.poster) return vvAbsUrl(item.poster);
+        var best = '', bestArea = 0;
+        var vs = document.querySelectorAll('video[poster]');
+        for (var i = 0; i < vs.length; i++) {
+            var p = vs[i].getAttribute('poster');
+            if (!p) continue;
+            var r = vs[i].getBoundingClientRect();
+            var a = (r.width || 0) * (r.height || 0);
+            if (!best || a > bestArea) { best = p; bestArea = a; }
+        }
+        if (best) return vvAbsUrl(best);
+        var og = document.querySelector('meta[property="og:image"],meta[name="og:image"],meta[itemprop="image"]');
+        var c = og && og.getAttribute('content');
+        if (c) return vvAbsUrl(c);
+    } catch (e) {}
+    return '';
+}
+
+function vvShowPoster(src) {
+    try {
+        if (!POSTER) return;
+        var url = String(src || '');
+        if (!url) { vvHidePoster(); return; }
+        // url() 里只可能因为引号出事，统一转义一下，别让站点给的地址把 CSS 断掉
+        POSTER.style.backgroundImage = 'url("' + url.replace(/["\\]/g, '\\$&') + '")';
+        POSTER.classList.add('on');
+        if (VV.active) { VV.active._posterOn = 1; VV.active._posterSrc = url; }
+    } catch (e) {}
+}
+
+function vvHidePoster() {
+    try {
+        if (!POSTER) return;
+        POSTER.classList.remove('on');
+        if (VV.active) VV.active._posterOn = 0;
+    } catch (e) {}
+}
+
+function vvShowLoading(text) {    try {
         if (!LOADING) return;
         var tx = LOADING.querySelector('.vv-load-text');
         if (tx) tx.innerHTML = vvEscape(text || '加载中…');
@@ -777,6 +825,8 @@ function vvShowErr(msg, title) {
         if (m) m.textContent = msg || '';
         ERRBOX.classList.add('on');
         vvHideLoading();
+        // 都失败了就别再把封面留在后面：看起来像"视频停在那儿"，会让人以为只是卡住
+        vvHidePoster();
     } catch (e) {}
 }
 
@@ -1068,6 +1118,89 @@ function vvHlsLoadPct() {
     }
 }
 
+// 还要多久才能开始（或恢复）播放（秒）。只用"确实在长"的信号，算不出来就不写：
+//   1) 缓冲增长速度（秒媒体 / 秒真实时间）—— 通用，直链与 HLS 都能用；
+//      但缓冲还是 0 的时候没有增长，这时给不出数（那就别编，加载环 + 速度已经够看）
+//   2) HLS 有分片吞吐与当前档码率时，能换算"每秒填几秒媒体"，第一片下完就有数
+// 目标缓冲量取 1.5 秒：播放器够 1 秒就能起/能续，按 15 秒目标算出来的是"缓冲攒满"，
+// 比用户真正要等的时间长一个量级，等于骗人。
+var VV_ETA_TARGET_S = 1.5;
+// 当前分片下到几成了（已下载字节 / 已耗时）：这一版 hls.js 没有 FRAG_LOAD_PROGRESS
+// 事件（vendor 里连事件名都没有），但 FRAG_LOADING 给出的 frag.stats 会随 XHR 的
+// onprogress 实时更新（真机实测 XHR 有 300 次增量回调、lengthComputable=1、total 有值），
+// 而加载层本来就在 300ms 轮询刷新，顺手读出来就够算 ETA 了。
+// 注意 stats.loading.start 是 performance.now()，别拿 Date.now() 去减。
+function vvReadFragProgress(act) {
+    try {
+        var st = act && act._liveFrag && act._liveFrag.stats;
+        if (!st || !st.loading || !st.loading.start) return;
+        var now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        var el = now - st.loading.start;
+        if (!(el > 0)) return;
+        var done = st.loaded || 0;
+        act._liveMs = Math.round(el);
+        act._liveLoaded = done;
+        act._liveTotal = st.total || 0;
+        // 瞬时速度（最近一个采样窗口）：全程平均会把慢启动那几百毫秒摊进去，
+        // ETA 就会一直偏高（实测首片 15s，全程平均算出来 32s，起播时还剩"13s"）
+        var lm = act._liveLastMs || 0, ld = act._liveLastLoaded || 0;
+        if (lm && el - lm >= 250 && done > ld) {
+            var inst = (done - ld) / ((el - lm) / 1000);   // 字节/秒
+            act._liveBps = act._liveBps ? (act._liveBps * 0.5 + inst * 0.5) : inst;
+        }
+        act._liveLastMs = el;
+        act._liveLastLoaded = done;
+    } catch (e) {}
+}
+function vvLoadEta(act, ahead) {
+    try {
+        if (!act) return 0;
+        var need = Math.max(0, VV_ETA_TARGET_S - (ahead || 0));
+        if (need <= 0) return 0;
+        var secs = 0;
+        // ① 有总大小与时长：算出"够播的那点数据"还差多少字节，排队里最准
+        //    （直接拿剩余字节算会变成"整段下完还要多久"，能差十倍）
+        var total = act._total || 0, loaded = act._loaded || 0;
+        var dur = (VID && VID.duration && isFinite(VID.duration)) ? VID.duration : 0;
+        if (total > 0 && act._spd > 0 && dur > 0) {
+            var needB = total * (VV_ETA_TARGET_S / dur) - loaded;
+            if (needB > 0) secs = needB / (act._spd * 1024);
+        }
+        // ② 缓冲增长速度（秒媒体 / 秒真实时间）：通用信号
+        if (!secs) {
+            var rate = act._aheadRate || 0;
+            var isHls = !!(act.item && act.item.type === 'HLS');
+            // ③ HLS 起播阶段等的是"首个分片下完"，不是"够 1.5s 缓冲"：
+            //    分片没 append 之前一帧都画不出来，按够播换算会给出一个远小于真实
+            //    等待的数（慢源上 2s vs 实际 15s），那是骗人。这里直接用 hls 自己
+            //    的分片进度算「这一片还要多久」。
+            //    一旦下完过一片（_fragLoads 非空），首片已就绪，正在下的就是"下一片"，
+            //    拿它算会让用户以为还要等很久（实测首片 15s 下完后转码期间写着"约 10s"，
+            //    而真实只剩 1.3s）——那时改走 ④ 的码率换算。
+            if (isHls && !((act._lastGoodT || 0) > 0.5) && !(act._fragLoads && act._fragLoads.length)) {
+                var liveMs = act._liveMs || 0, liveDone = act._liveLoaded || 0, liveTotal = act._liveTotal || 0;
+                if (liveMs >= 250 && liveDone > 0 && liveTotal > liveDone) {
+                    // 优先用瞬时速度：平均速度把慢启动摊进去，会一直偏大
+                    var sp2 = (act._liveBps > 0) ? act._liveBps : (liveDone / liveMs) * 1000;
+                    if (sp2 > 0) secs = (liveTotal - liveDone) / sp2;
+                }
+            }
+            // ④ 分片全部下完（没有在下的片）时，用「分片吞吐 ÷ 当前档码率」换算
+            //    "每秒填几秒媒体"。这是 HLS 唯一剩下的估算路径，粗但聊胜于无。
+            if (!secs && !(rate > 0.01) && isHls) {
+                var bps = act._fragMsSum > 0 ? (act._fragBytesSum / act._fragMsSum) * 1000 : 0;
+                var inst = act.hlsInst;
+                var lv = inst && inst.levels && inst.currentLevel >= 0 ? inst.levels[inst.currentLevel] : null;
+                var br = lv && lv.bitrate;
+                if (bps > 0 && br > 0) rate = (bps * 8) / br - ((VID && !VID.paused) ? 1 : 0);
+            }
+            if (!secs && rate > 0.01) secs = need / rate;
+        }
+        var eta = Math.round(secs);
+        return (eta >= 1 && eta <= 180) ? eta : 0;
+    } catch (e) { return 0; }
+}
+
 // 统一的进度刷新：
 // - 直链 mp4：能拿到总长度就用真实下载百分比，否则退回"缓冲时长比"
 // - HLS：没有"总大小"概念，用"已缓冲时长 / 目标缓冲时长"当进度
@@ -1077,6 +1210,7 @@ function vvUpdateLoadProgress() {
         if (!LOADING) return;
         var act = VV.active;
         if (!act) return;
+        vvReadFragProgress(act);
         var isHls = act.item && act.item.type === 'HLS';
         var pct = null, detail = '';
         var ahead = 0;
@@ -1085,6 +1219,23 @@ function vvUpdateLoadProgress() {
                 ahead = Math.max(0, VID.buffered.end(VID.buffered.length - 1) - (VID.currentTime || 0));
             }
         } catch (eA) {}
+        // 缓冲增长速度（秒媒体 / 秒真实时间）：拿不到总大小时，这是唯一能估"还要多久"的信号。
+        // 平滑一下，避免单个采样窗口里 ahead 跳变（seek 后预读、切档）把 ETA 带飞。
+        try {
+            var nowMs = Date.now();
+            if (!act._aheadT) { act._aheadT = nowMs; act._ahead0 = ahead; }
+            else if (nowMs - act._aheadT >= 600) {
+                var dA = ahead - (act._ahead0 || 0);
+                var dtS = (nowMs - act._aheadT) / 1000;
+                if (dtS > 0) {
+                    var r0 = dA / dtS;
+                    if (r0 > 0) act._aheadRate = act._aheadRate ? (act._aheadRate * 0.5 + r0 * 0.5) : r0;
+                    else if (r0 < 0) act._aheadRate = 0;   // 在播、缓冲没长：不算"在等"
+                }
+                act._aheadT = nowMs;
+                act._ahead0 = ahead;
+            }
+        } catch (eR0) {}
         if (isHls) {
             var sp = act._fragMsSum > 0 ? (act._fragBytesSum / act._fragMsSum) * 1000 / 1024 : (act._spd || 0);
             if (ahead > 0) pct = Math.min(100, (ahead / VV_LOAD_TARGET_S) * 100);
@@ -1102,6 +1253,10 @@ function vvUpdateLoadProgress() {
                 if (act._spd > 0) detail += ' · ' + vvFmtSpeed(act._spd);
             }
         }
+        // 还要等多久：慢网时"数字在涨"仍不足以判断，给个时间用户才愿意继续等
+        var etaS = vvLoadEta(act, ahead);
+        // detail 可能是空的（HLS 刚连上，速度还没测出来）：别让文案以「 · 约」打头
+        if (etaS > 0) detail += (detail ? ' · ' : '') + '约 ' + (etaS >= 60 ? Math.round(etaS / 60) + ' 分钟' : etaS + 's');
         var spinnerOn = LOADING.classList.contains('on');
         if (spinnerOn) {
             // 只有"播放中卡顿"才强制不确定态：
@@ -1291,6 +1446,15 @@ function vvLoadMedia(item) {
         VV.active._fragBytesSum = 0;
         VV.active._fragLoadingSince = 0;
         VV.active._fragLoadedAt = 0;
+        // 当前分片的实时进度（ETA 用）：换源后必须清零，否则拿上一片的字节数去
+        // 估这一片，会算出一个和现实无关的数
+        VV.active._liveMs = 0;
+        VV.active._liveLoaded = 0;
+        VV.active._liveTotal = 0;
+        VV.active._liveBps = 0;
+        VV.active._liveLastMs = 0;
+        VV.active._liveLastLoaded = 0;
+        VV.active._liveFrag = null;
         // 起播看门狗的判据全部重置：换源/重建是一次全新的起播，不能带着上一轮的
         // "刚下到过数据"记录，否则新地址明明没动静也会被续命拖到总上限。
         VV.active._netAt = 0;
@@ -1313,6 +1477,8 @@ function vvLoadMedia(item) {
     var url = item.url;
     // 起播看门狗：打开后 12s 还没有画面就给错误卡片（不同站点策略差异很大，不能只靠 toast）
     vvHideErr();
+    // 封面先顶上去，首帧到了（playing）再摘
+    vvShowPoster(vvPickPoster(item));
     vvArmStartWatchdog();
     if (item.type === 'BLOB') {
         // blob: 是页面自己 MSE 会话的句柄，换到独立播放器必然拿不到数据
@@ -1415,13 +1581,27 @@ function vvLoadMedia(item) {
                         }
                     } catch (eLS) {}
                 });
-                if (hlsEv.FRAG_LOADING) inst.on(hlsEv.FRAG_LOADING, function () {
-                    try { if (VV.active) VV.active._fragLoadingSince = Date.now(); } catch (eFL0) {}
+                if (hlsEv.FRAG_LOADING) inst.on(hlsEv.FRAG_LOADING, function (eFL1, dataFL) {
+                    try {
+                        if (VV.active) {
+                            VV.active._fragLoadingSince = Date.now();
+                            // 留住这一片，ETA 要轮询问它"下到几成了"
+                            VV.active._liveFrag = (dataFL && dataFL.frag) || null;
+                        }
+                    } catch (eFL0) {}
                 });
                 if (hlsEv.FRAG_LOADED) inst.on(hlsEv.FRAG_LOADED, function (eF, dataF) {
                     try {
                         if (VV.active) {
                             VV.active._fragLoadingSince = 0;
+                            // 这一片下完了，实时进度不再代表"在等的东西"，交给累计吞吐
+                            VV.active._liveFrag = null;
+                            VV.active._liveMs = 0;
+                            VV.active._liveLoaded = 0;
+                            VV.active._liveTotal = 0;
+                            VV.active._liveBps = 0;
+                            VV.active._liveLastMs = 0;
+                            VV.active._liveLastLoaded = 0;
                             // 记录"最近一次真的拿到分片"的时刻：起播看门狗用它区分
                             // 「网络慢但数据在走」和「流根本没动静」
                             VV.active._fragLoadedAt = Date.now();
@@ -1876,6 +2056,8 @@ function vvBindVideo() {
         }
         // 已经有画面了：起播看门狗收工，错误卡片也收起
         if (VV.active) VV.active._sawFrame = true;
+        // 封面让位给真实画面：淡出由 CSS 过渡做，别在这里叠一次动画
+        vvHidePoster();
         vvDisarmStartWatchdog();
         vvHideErr();
         // 缓冲已经接上，恢复正常播放的短超时，让后续慢分片能触发降档

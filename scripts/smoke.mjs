@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,startTarget:vvStartTarget,withFrag:vvWithStartFragment,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;},netFlow:vvNetFlow,armWdog:vvArmStartWatchdog,disarmWdog:vvDisarmStartWatchdog,markSlow:vvMarkLoadingSlow};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,startTarget:vvStartTarget,withFrag:vvWithStartFragment,loadEta:vvLoadEta,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;},netFlow:vvNetFlow,armWdog:vvArmStartWatchdog,disarmWdog:vvDisarmStartWatchdog,markSlow:vvMarkLoadingSlow};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -1421,6 +1421,52 @@ eq('已有 #t=：替换而不是再拼一个', T.withFrag('http://x/a.mp4#t=40',
 eq('已有 #t= 带别的指令：只换 t', T.withFrag('http://x/a.mp4#t=40&foo=1', 6.5), 'http://x/a.mp4#t=6.5&foo=1');
 eq('别的媒体片段（xywh）：追加 t 指令', T.withFrag('http://x/a.mp4#xywh=0,0,10,10', 6.5), 'http://x/a.mp4#xywh=0,0,10,10&t=6.5');
 eq('小数保留两位', T.withFrag('http://x/a.mp4', 6.666), 'http://x/a.mp4#t=6.67');
+
+// ---- 加载 ETA：口径是「还要多久才够播」，目标是 1 秒缓冲 ----
+// 不按剩余字节算：那算的是整段下完，用户等的只是"够播了"；带 Range 的 mp4 还常给不出 total。
+eq('缓冲增长速度未知就不给', T.loadEta({}, 0), 0);
+eq('增长速度太慢（<0.01 秒/秒）就不给', T.loadEta({ _aheadRate: 0.005 }, 0), 0);
+eq('1 秒/秒、缓冲 0s：还要约 2s 才够播', T.loadEta({ _aheadRate: 1 }, 0), 2);
+eq('缓冲已经够了（≥1.5s）：不需要 ETA', T.loadEta({ _aheadRate: 1 }, 1.6), 0);
+eq('慢但不至于太久：给出 38s', T.loadEta({ _aheadRate: 0.04 }, 0), 38);
+eq('要等太久（>180s）就不给数字', T.loadEta({ _aheadRate: 0.001 }, 0), 0);
+// HLS 没有 ahead 增长时，用「分片吞吐 ÷ 当前档码率」兜底（第一片下完就有数）
+eq('HLS：没有分片吞吐就不给', T.loadEta({ item: { type: 'HLS' }, _fragMsSum: 0, _fragBytesSum: 0 }, 0), 0);
+eq('HLS：吞吐 50KB/s、码率 200kbps → 约 1s', T.loadEta({
+    item: { type: 'HLS' }, _fragMsSum: 1000, _fragBytesSum: 51200,
+    hlsInst: { currentLevel: 0, levels: [{ bitrate: 200000 }] }
+}, 0), 1);
+
+// HLS 起播阶段：等的是「首个分片下完」，不是「够 1.5s 缓冲」。
+// 分片没 append 之前一帧都画不出来，按「够播」换算会给出 2s 这种假数，而真实要等 15s。
+eq('HLS 起播：按本片剩余字节算（245KB 下到 90KB @9KB/s → 约 17s）', T.loadEta({
+    item: { type: 'HLS' }, _liveMs: 10000, _liveLoaded: 90000, _liveTotal: 245000,
+    _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 17);
+eq('HLS 起播：有瞬时速度就优先用它（平均速度把慢启动摊进去会一直偏大）', T.loadEta({
+    item: { type: 'HLS' }, _liveMs: 4000, _liveLoaded: 20000, _liveTotal: 245000,
+    _liveBps: 16000, _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 14);
+eq('播过一帧后不再按「首片剩余」算（那时看的是缓冲够不够续）', T.loadEta({
+    item: { type: 'HLS' }, _lastGoodT: 5, _liveMs: 10000, _liveLoaded: 90000, _liveTotal: 245000,
+    _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 0);
+eq('首片已下完（正在下第二片）就不按「本片剩余」算', T.loadEta({
+    item: { type: 'HLS' }, _liveMs: 1500, _liveLoaded: 20000, _liveTotal: 245000,
+    _liveBps: 16000, _fragLoads: [15200], _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 0);
+eq('拿不到本片总大小就不给（总比给个假数强）', T.loadEta({
+    item: { type: 'HLS' }, _liveMs: 10000, _liveLoaded: 90000, _liveTotal: 0,
+    _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 0);
+eq('刚连上就估（<250ms）不给', T.loadEta({
+    item: { type: 'HLS' }, _liveMs: 100, _liveLoaded: 9000, _liveTotal: 245000,
+    _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 0);
+eq('直链不用「首片剩余」口径', T.loadEta({
+    item: { type: 'MP4' }, _liveMs: 10000, _liveLoaded: 90000, _liveTotal: 245000,
+    _fragMsSum: 0, _fragBytesSum: 0
+}, 0), 0);
 
 // 播完不能再把结尾位置写回去：ended 时清零，紧接着的 pause/close 又会写回 9.9
 const sv = new sandbox.window.HTMLMediaElement();

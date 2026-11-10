@@ -81,6 +81,8 @@ const SCENARIOS = [
             c.chk(c.rescue === 0, '不触发解码器自救（慢 ≠ 解码器被占满）');
             c.chk(c.ext >= 1, '12s 时按证据续命，而不是判死');
             c.chk(c.slowText, '加载环改文案为「网络较慢，仍在加载」');
+            // 8KB/s 时 moov 都还没到，页面上任何字节数都是 0，ETA 没有输入可算 ——
+            // 所以这里不断言 ETA（它的主场在 HLS 首片慢，见 hls-frag 场景）。
         }
     },
     {
@@ -128,6 +130,10 @@ const SCENARIOS = [
             c.chk(c.rescue === 0, '不销毁重建播放实例');
             c.chk(c.ext >= 1, '12s 时按「分片在飞」续命');
             c.chk(c.played, '首片下完后正常出画');
+            // 首片 245KB @16KB/s ≈ 15s：这段时间一帧都画不出来，ETA 是唯一能回答
+            // "还要等多久"的东西，而且必须按"本片剩余字节"算，不能按"够 1.5s 缓冲"
+            c.chk(/约\s*\d+\s*(?:s|分钟)/.test(c.etaText), '加载明细给出「约 Ns」');
+            c.chk(/约\s*(?:[1-9]\d?|1[0-2]\d)\s*s/.test(c.etaText), 'ETA 落在真实量级（1–120s）');
         }
     }
 ];
@@ -250,7 +256,9 @@ try {
             ext: Math.max(0, ...samples.map((s) => s.ext || 0)),
             maxFlow: Math.max(0, ...samples.map((s) => s.flow || 0)),
             played,
-            slowText: samples.some((s) => s.el > 12000 && s.ltx.indexOf('网络较慢') >= 0 && s.lon === 1)
+            slowText: samples.some((s) => s.el > 12000 && s.ltx.indexOf('网络较慢') >= 0 && s.lon === 1),
+            // ETA 只在"确实算出数"时写，所以取第一个出现「约 N」的采样当证据（没有就是空串）
+            etaText: samples.map((s) => s.ldet || '').filter((t) => /约\s*\d+/.test(t))[0] || ''
         };
 
         // 逐条断言 + 一行关键现场，跑挂了能直接从输出定位

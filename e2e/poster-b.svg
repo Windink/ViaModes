@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#2a1d3a"/>
+  <circle cx="180" cy="240" r="130" fill="#5b3f86" opacity=".6"/>
+  <text x="40" y="80" fill="#d8b4fe" font-family="system-ui" font-size="34">poster-b</text>
+</svg>

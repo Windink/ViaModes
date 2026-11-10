@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>起播封面 + 加载 ETA · Via 真机</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  video { width: 180px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>起播封面 + 加载 ETA（Via 真机）</h1>
+<p>起播等待期必须有封面顶着（别让用户对着纯黑等解码），首帧一到要摘掉；
+   慢网时加载明细要给出「已缓冲 x s / 速度」与「约 Ns（够播还要多久）」，低特效模式下封面不许再走 blur。</p>
+<video id="seed" preload="metadata" poster="/e2e/poster-a.svg" src="/e2e/media/bb720.mp4"></video>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var RUN = (/loading-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var SLOW = (/\?(?:.*&)?slow=(\d+)/.exec(location.search) || [])[1] || '';
+    var SLOWBASE = SLOW ? 'http://127.0.0.1:' + SLOW : '';
+    // HLS 慢分片清单由驱动脚本现生成（分片要写本机慢端口，端口每轮不同）
+    var M3U8 = (/\?(?:.*&)?m3u8=([^&]+)/.exec(location.search) || [])[1] || '';
+    M3U8 = M3U8 ? decodeURIComponent(M3U8) : '';
+    var ONLY = ((/\?(?:.*&)?only=([^&]+)/.exec(location.search) || [])[1] || '')
+        .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function hudText(s) { hud.textContent = s; }
+    function vvOpen(item) { window.__vv.open(item); }
+    function closeAll() { try { window.__vv.close(); } catch (e) {} }
+
+    var PASS = 0, FAIL = 0, LINES = [];
+    function ok(name, cond, detail) {
+        var p = !!cond;
+        if (p) PASS++; else FAIL++;
+        LINES.push({ name: name, pass: p, detail: detail || '' });
+        send({ tag: 'ok', name: name, pass: p, detail: String(detail || '') });
+        return p;
+    }
+
+    function posterEl() { return document.querySelector('.vv-player-root .vv-poster'); }
+    function posterState() {
+        var p = posterEl();
+        if (!p) return { has: false, on: false, bg: '', filter: '' };
+        var cs = null;
+        try { cs = getComputedStyle(p); } catch (e) {}
+        return {
+            has: true,
+            on: p.classList.contains('on'),
+            bg: p.style.backgroundImage || '',
+            filter: cs ? (cs.filter || 'none') : 'none'
+        };
+    }
+    function detailText() {
+        var d = document.querySelector('.vv-player-root .vv-load-detail');
+        return d ? (d.textContent || '') : '';
+    }
+    function playerInfo() {
+        var v = document.querySelector('.vv-player-root video');
+        return { v: v, playing: !!(v && !v.paused && v.readyState >= 2) };
+    }
+
+    // A：起播等待期封面（60KB/s，几秒内就会出画，只看封面与"首帧后收起"）
+    async function scPosterEta() {
+        var st0 = posterState(); // 播放器还没建，应该什么都没有
+        ok('未打开时不残留封面层', !st0.has);
+        var t0 = performance.now();
+        vvOpen({ url: SLOWBASE + '/e2e/media/bb720.mp4?kbps=60', type: 'MP4', name: '封面', source: 'test' });
+        var seenOn = null, seenBg = '', firstFrameAt = -1, offAfterFrame = null;
+        var dts = [];
+        while (performance.now() - t0 < 40000) {
+            var ps = posterState(), pi = playerInfo();
+            if (seenOn === null && ps.on) { seenOn = Math.round(performance.now() - t0); seenBg = ps.bg; }
+            var dt = detailText();
+            if (dt && dts.indexOf(dt) < 0 && dts.length < 6) dts.push(dt);
+            if (pi.playing && firstFrameAt < 0) firstFrameAt = Math.round(performance.now() - t0);
+            if (firstFrameAt > 0 && offAfterFrame === null) offAfterFrame = !ps.on;
+            if (pi.playing && !ps.on) break;
+            await wait(120);
+        }
+        var act = (window.__vv && window.__vv.VV && window.__vv.VV.active) || {};
+        ok('起播等待期封面已铺上', seenOn !== null, seenOn === null ? '一直没 on' : ('+' + seenOn + 'ms'));
+        ok('封面用的是页面 video 的 poster（兜底来源）', /poster-a\.svg/.test(seenBg), seenBg.slice(0, 90));
+        ok('首帧出现后封面收起', offAfterFrame === true || (firstFrameAt > 0 && !posterState().on),
+            'firstFrame=' + firstFrameAt + 'ms posterOn=' + posterState().on);
+        ok('低特效下封面不做 blur（省一次全屏重采样）', !/blur/.test(posterState().filter),
+            posterState().filter);
+        send({ tag: 'diag', phase: 'poster', firstFrameAt: firstFrameAt, dts: dts });
+        closeAll();
+        await wait(1200);
+    }
+
+    // B：慢到 canplay 都不来的时候，明细里要给出「约 Ns」。
+    // 这条必须真的慢：快源上 canplay 会把加载层提前收掉，ETA 根本没机会显示，
+    // 而"慢资源续命"正是用户要一个时间估计的场合。
+    async function scEtaSlow() {
+        var t0 = performance.now();
+        vvOpen({ url: SLOWBASE + '/e2e/media/bb720.mp4?kbps=25', type: 'MP4', name: 'ETA', source: 'test' });
+        var seenEta = '', seenDetail = '', dts = [], firstFrameAt = -1;
+        while (performance.now() - t0 < 40000) {
+            var dt = detailText();
+            if (!seenEta && /约\s*\d+\s*(?:s|分钟)/.test(dt)) seenEta = dt;
+            if (dt && dts.indexOf(dt) < 0 && dts.length < 8) dts.push(dt);
+            if (!seenDetail && dt) seenDetail = dt;
+            var pi = playerInfo();
+            if (pi.playing && firstFrameAt < 0) { firstFrameAt = Math.round(performance.now() - t0); break; }
+            await wait(150);
+        }
+        var act = (window.__vv && window.__vv.VV && window.__vv.VV.active) || {};
+        ok('mp4 慢网：加载明细有内容', !!seenDetail, seenDetail);
+        ok('明细口径是「已缓冲/已下载 + 速度」', /已缓冲|已下载/.test(seenDetail), seenDetail);
+        // Android 直链拿不到字节数，只剩"缓冲在涨"这一个信号（实测 aheadRate≈1.75 s/s），
+        // 而 mp4 一跳到 1.0s 缓冲离"够播"就只差零点几秒 → 算出来 <1s 被过滤，不写才是对的。
+        // 所以这条只守"要么不写、要么是合法格式"，"必须有 ETA"由 HLS 场景守。
+        ok('mp4 慢网：若出现「约」必须是「约 Ns / 约 N 分钟」', !/约/.test(seenDetail) || /约\s*\d+\s*(?:s|分钟)/.test(seenDetail),
+            seenDetail + '  · ETA=' + (seenEta || '未出现'));
+        send({ tag: 'diag', phase: 'eta-slow', firstFrameAt: firstFrameAt, seenEta: seenEta,
+            seenDetail: seenDetail, dts: dts, aheadRate: +(act._aheadRate || 0).toFixed(2) });
+        closeAll();
+        await wait(1200);
+    }
+
+    // C：HLS 首片慢 —— ETA 真正有主场的场景。
+    // 首片 245KB 限速 16KB/s ≈ 15s 才下完，这 15s 里页面一帧都画不出来，
+    // "还要等多久"只有 ETA 能回答；此时按"够 1.5s 缓冲"换算会给出 2s 这种假数，
+    // 所以实现里起播阶段改成「本片剩余字节 ÷ 实时吞吐」。
+    async function scEtaHls() {
+        if (!M3U8) { ok('HLS 首片慢：拿到清单地址', false, '缺少 ?m3u8='); return; }
+        var t0 = performance.now();
+        vvOpen({ url: M3U8, type: 'HLS', name: 'ETA-HLS', source: 'test' });
+        // 诊断：ETA 不出现时要能分清是"事件没来""Total 拿不到"还是"算出来是 0"
+        var dbg = { nProg: 0, hooked: false, first: null, sampled: [] };
+        var iv = setInterval(function () {
+            var a = (window.__vv && window.__vv.VV && window.__vv.VV.active) || null;
+            if (!a) return;
+            if (!dbg.hooked && a.hlsInst && a.hlsInst.on) {
+                dbg.hooked = true;
+                try {
+                    a.hlsInst.on('hlsFragLoadProgress', function (e, d) {
+                        dbg.nProg++;
+                        var st = d && d.frag && d.frag.stats;
+                        if (!dbg.first && st) dbg.first = { loaded: st.loaded, total: st.total };
+                    });
+                } catch (e0) { dbg.err = String(e0 && e0.message); }
+            }
+            if (a._liveMs && dbg.sampled.length < 6) dbg.sampled.push([a._liveMs, a._liveLoaded, a._liveTotal]);
+        }, 100);
+        var seenEta = '', seenDetail = '', firstFrameAt = -1, dts = [], atFrame = '';
+        while (performance.now() - t0 < 45000) {
+            var dt = detailText();
+            if (!seenEta && /约\s*\d+\s*(?:s|分钟)/.test(dt)) seenEta = dt;
+            if (dt && dts.indexOf(dt) < 0 && dts.length < 14) dts.push(dt);
+            if (!seenDetail && dt) seenDetail = dt;
+            var pi = playerInfo();
+            // 首帧那一刻明细上写着什么，才是用户真正看到的最后一个数
+            if (pi.playing && firstFrameAt < 0) {
+                firstFrameAt = Math.round(performance.now() - t0);
+                atFrame = dt;
+                break;
+            }
+            await wait(150);
+        }
+        var act = (window.__vv && window.__vv.VV && window.__vv.VV.active) || {};
+        clearInterval(iv);
+        ok('HLS 首片慢：加载明细给出「约 Ns」', /约\s*\d+\s*(?:s|分钟)/.test(seenEta),
+            seenEta || ('未出现 / 首条明细=' + seenDetail));
+        var n = +(((seenEta.match(/约\s*(\d+)/) || [])[1]) || 0);
+        // 真实剩余十几秒：算出 1s 说明还在按"够播"换算，算出上百秒说明拿整段文件算
+        ok('ETA 落在真实量级（1–120s）', n >= 1 && n <= 120, seenEta + ' → ' + n + 's');
+        send({ tag: 'diag', phase: 'eta-hls', firstFrameAt: firstFrameAt, seenEta: seenEta,
+            seenDetail: seenDetail, dts: dts,
+            liveMs: act._liveMs, liveLoaded: act._liveLoaded, liveTotal: act._liveTotal,
+            nProg: dbg.nProg, hooked: dbg.hooked, firstProg: dbg.first,
+            liveSamples: dbg.sampled, hookErr: dbg.err, atFrame: atFrame });
+        closeAll();
+        await wait(1200);
+    }
+
+    // B：条目自带 poster 优先于页面封面
+    async function scItemPoster() {
+        vvOpen({
+            url: location.origin + '/e2e/flower.mp4', type: 'MP4', name: '条目封面',
+            poster: location.origin + '/e2e/poster-b.svg', source: 'test'
+        });
+        await wait(120);
+        var ps = posterState();
+        ok('条目自带封面时用它（优先于页面 poster）', /poster-b\.svg/.test(ps.bg), ps.bg.slice(0, 90));
+        ok('条目封面同样处于显示态', ps.on === true);
+        closeAll();
+        await wait(900);
+    }
+
+    // C：拿不到封面就不显示（不许自己造一个色块顶上去）
+    async function scNoPoster() {
+        var seed = document.getElementById('seed');
+        var bak = seed.getAttribute('poster');
+        seed.removeAttribute('poster');
+        vvOpen({ url: location.origin + '/e2e/flower.mp4', type: 'MP4', name: '无封面', source: 'test' });
+        await wait(150);
+        var ps = posterState();
+        ok('拿不到封面时封面层不显示', ps.has && !ps.on, 'has=' + ps.has + ' on=' + ps.on);
+        ok('拿不到封面时不留背景图', !ps.bg || ps.bg === 'none', ps.bg.slice(0, 60));
+        closeAll();
+        if (bak) seed.setAttribute('poster', bak);
+        await wait(900);
+    }
+
+    // D：Via 的 WebView 到底给不给 XHR 增量进度？
+    // 这是 ETA 能不能在真机上成立的地基：hls 的 FRAG_LOAD_PROGRESS 来自 XHR 的 onprogress，
+    // 如果这层只在结束时回调一次，"分片下到几成"就无从得知，ETA 只能等下完整片。
+    function scXhrProgress() {
+        return new Promise(function (resolve) {
+            var x = new XMLHttpRequest();
+            var n = 0, lc = -1, first = 0, last = 0, tot = 0;
+            x.open('GET', SLOWBASE + '/e2e/media/hls/seg0.ts?kbps=16', true);
+            x.onprogress = function (e) {
+                n++;
+                lc = e.lengthComputable ? 1 : 0;
+                if (!first) first = e.loaded;
+                last = e.loaded; tot = e.total;
+            };
+            x.onload = function () {
+                ok('Via 的 XHR 给出增量进度（>1 次）', n > 1,
+                    'n=' + n + ' lengthComputable=' + lc + ' 首次 ' + first + 'B 末次 ' + last + '/' + tot);
+                ok('XHR 进度带总大小（lengthComputable）', lc === 1, 'lc=' + lc + ' total=' + tot);
+                send({ tag: 'diag', phase: 'xhr', n: n, lc: lc, first: first, last: last, total: tot });
+                resolve();
+            };
+            x.onerror = function () { ok('XHR 能拉到慢资源', false, 'onerror'); resolve(); };
+            x.send();
+        });
+    }
+
+    async function main() {
+        var vv = null;
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.open) { vv = window.__vv; break; }
+            await wait(200);
+        }
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        send({ tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            slow: SLOW, ua: navigator.userAgent.slice(0, 120),
+            vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio });
+        if (!vv) { send({ tag: 'done', pass: 0, fail: 1, err: 'no __vv' }); return; }
+        if (!SLOWBASE) { send({ tag: 'done', pass: 0, fail: 1, err: 'no slow port' }); return; }
+
+        var list = [
+            { id: 'item-poster', fn: scItemPoster },
+            { id: 'no-poster', fn: scNoPoster },
+            { id: 'poster', fn: scPosterEta },
+            { id: 'eta-slow', fn: scEtaSlow },
+            { id: 'eta-hls', fn: scEtaHls },
+            { id: 'xhr-progress', fn: scXhrProgress }
+        ].filter(function (s) { return !ONLY.length || ONLY.indexOf(s.id) >= 0; });
+
+        for (var j = 0; j < list.length; j++) {
+            hudText('▶ ' + list[j].id);
+            var before = FAIL;
+            try { await list[j].fn(); } catch (e) {
+                ok(list[j].id + ' 执行未抛异常', false, String(e && (e.message || e)));
+            }
+            send({ tag: 'scene', id: list[j].id, fail: FAIL - before });
+        }
+        hudText('DONE ' + PASS + ' pass / ' + FAIL + ' fail');
+        send({ tag: 'done', pass: PASS, fail: FAIL, lines: LINES.length });
+    }
+    main().catch(function (e) {
+        send({ tag: 'fatal', msg: String(e && (e.stack || e.message || e)) });
+        send({ tag: 'done', pass: PASS, fail: FAIL + 1, aborted: true });
+    });
+})();
+</script>
+<!-- 不在这里加载 dist：真机测试台依赖 Via 已安装的用户脚本注入 -->
+</body>
+</html>
