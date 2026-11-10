@@ -27,7 +27,9 @@ const REPORT = join(ROOT, '.tmp/report.log');
 
 let server = null;
 function sh(args) {
+    // daemon 会被回收：每次调用先重连，长窗口等待期间还要定时重建 reverse
     try {
+        execFileSync(ADB, ['connect', SERIAL], { encoding: 'utf8', timeout: 30000 });
         return execFileSync(ADB, ['-s', SERIAL, ...args], {
             encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, timeout: 30000
         });
@@ -77,6 +79,9 @@ try {
     let done = false;
     for (let i = 0; i < 300; i++) {
         await sleep(300);
+        // 每 2 秒重建一次映射：开完页不碰 adb 会让 daemon 被回收、reverse 清空，
+        // 页面后续上报（含末尾的角标现场）会全部静默丢失
+        if (i % 7 === 0) sh(['reverse', `tcp:${PORT}`, `tcp:${PORT}`]);
         const rows = readRows().filter((r) => r.run === pageTag);
         if (rows.some((r) => r.tag === 'done')) { done = true; break; }
     }
@@ -84,6 +89,7 @@ try {
     const env = rows.find((r) => r.tag === 'env') || {};
     const fn = rows.find((r) => r.tag === 'cfgFn') || {};
     const inst = rows.find((r) => r.tag === 'cfgInst') || {};
+    const badge = rows.find((r) => r.tag === 'badge') || {};
     const fin = rows.find((r) => r.tag === 'done') || {};
 
     console.log('=== 环境 ===');
@@ -119,6 +125,13 @@ try {
             console.log('（无网/单档：未触发多档加查，核心配置断言已覆盖）');
         }
     }
+
+    // 角标数字防抖（页面在跑完画质断言后做的一组现场实验）
+    ok('角标首次立即写入 5（不闪空红点）', badge.first === '5', JSON.stringify(badge));
+    ok('连续变化 400ms 内数字不跳', badge.during === '5' && badge.during === badge.first,
+        'during=' + badge.during + ' first=' + badge.first);
+    ok('安静后一次刷到最终值 7', badge.final === '7' && badge.shown === 7,
+        'final=' + badge.final + ' shown=' + badge.shown);
 
     console.log('\n=== 断言 ===');
     let fail = 0;

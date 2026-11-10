@@ -148,16 +148,34 @@ function vvStopPanelTop() {
     } catch (e) {}
 }
 
+// 资源是陆续嗅探到的，主清单合并 / 去重还会让条数回落：每次变化都立刻写数字会看到
+// 「3 → 5 → 4 → 6」来回跳。连续变化只重置一个短定时器，安静下来再一次性刷到最终值。
+var VV_BADGE_NUM_DEBOUNCE = 400;
+
 function vvShowBadgeNew() {
     // 分享 / 选集浮层开着时别把角标放出来：它同样挂在 <html> 末尾且 z-index 同级
     if (VV.items.length === 0 || VV.playerActive || VV._panelOpen || vvHasPriorityOverlay()) return;
     try {
         var b = vvBadge();
-        var num = b.querySelector('.vv-badge-num');
-        if (num) num.innerHTML = String(VV.items.length);
         vvBringToFront(b);
         b.classList.add('show');
         vvKeepBadgeTop(b);
+        var num = b.querySelector('.vv-badge-num');
+        if (!num) return;
+        // 首次显示立即写，否则会先闪一个空红点；之后才走防抖
+        if (VV._badgeNumShown === null || VV._badgeNumShown === undefined) {
+            VV._badgeNumShown = VV.items.length;
+            num.textContent = String(VV._badgeNumShown);
+            return;
+        }
+        try { if (VV._badgeNumTimer) clearTimeout(VV._badgeNumTimer); } catch (e0) {}
+        VV._badgeNumTimer = setTimeout(function () {
+            VV._badgeNumTimer = 0;
+            var n = VV.items.length;
+            if (n === VV._badgeNumShown) return;
+            VV._badgeNumShown = n;
+            try { num.textContent = String(n); } catch (e1) {}
+        }, VV_BADGE_NUM_DEBOUNCE);
     } catch (e) {}
 }
 
@@ -172,6 +190,9 @@ function vvToggleBadge(show) {
         } else {
             b.classList.remove('show');
             vvStopBadgeTop();
+            // 角标收起来了：丢掉还没落地的防抖写入，下次露面立即反映当前条数
+            try { if (VV._badgeNumTimer) { clearTimeout(VV._badgeNumTimer); VV._badgeNumTimer = 0; } } catch (e0) {}
+            VV._badgeNumShown = null;
         }
     } catch (e) {}
 }

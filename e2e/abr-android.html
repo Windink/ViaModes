@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>多档 HLS · ABR 选档对照（Via 真机）</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: pre-wrap; }
+  #stage { position: relative; height: 190px; background: #000; margin-bottom: 8px; }
+  #stage video { width: 100%; height: 100%; background: #000; }
+</style>
+</head>
+<body>
+<div id="hud">测量中…</div>
+<h1>多档 HLS · ABR 选档对照</h1>
+<p>同一个 4 档主清单、同一档限速下，交替跑「页面自己用裸 hls.js」与「内置播放器」，
+看起播档 / 最终档 / 爬档轨迹有没有被产品配置带偏。桌面 v0.1.64 在单档对照里观察到
+「主清单下我们起播档反而更保守」，这轮补真机多档数据，先出数再决定改不改。</p>
+<div id="stage"></div>
+
+<!-- 页面自己的一份 hls.js：与产品内联的是同一份 vendor 源码，裸臂用它 new 实例 -->
+<script src="/e2e/vendor/hls-light.js"></script>
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var stage = document.getElementById('stage');
+    var RUN = (/abr-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var Q = new URLSearchParams(location.search);
+    var MASTER = { low: Q.get('low') || '', high: Q.get('high') || '' };
+    var ARM_MS = 12000, SAMPLE_MS = 250;
+    var PASS = 0, FAIL = 0, ERRS = [];
+    var liveVideos = [], activated = false, gestureSeq = 0;
+
+    window.addEventListener('error', function (e) {
+        ERRS.push(String(e && (e.message || (e.error && e.error.message)) || 'unknown'));
+    });
+    // Via 的 WebView 会挡住「页面自己建的 video」自动播放（play() rejected: page autoplay
+    // blocked），而产品播放器有自己的手势解锁。驱动在开页后点几下屏幕制造真实用户激活，
+    // 这里在手势回调里补一次 play()，两臂才站在同一起跑线上。
+    function unlock() {
+        activated = true;
+        gestureSeq++;
+        for (var i = 0; i < liveVideos.length; i++) {
+            try {
+                var p = liveVideos[i].play();
+                if (p && p.catch) p.catch(function () {});
+            } catch (e) {}
+        }
+    }
+    document.addEventListener('click', unlock, true);
+    document.addEventListener('touchend', unlock, true);
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    send({ tag: 'boot', href: location.href.slice(0, 240) });
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function ok(name, cond, detail) {
+        var p = !!cond;
+        if (p) PASS++; else FAIL++;
+        send({ tag: 'ok', name: name, pass: p, detail: String(detail || '') });
+        return p;
+    }
+    function untilReady() {
+        return new Promise(function (resolve) {
+            var n = 0;
+            (function tick() {
+                if (window.__vv && window.__vv.VV && window.Hls) return resolve(true);
+                if (++n > 120) return resolve(false);
+                setTimeout(tick, 200);
+            })();
+        });
+    }
+    // Via 的自动播放解锁有时效：距上次点击 30 秒后新建的 video 又会被挡。
+    // 所以每个裸臂开始前都向驱动要一次新点击，等 gestureSeq 前进再开跑。
+    function waitGesture(ms) {
+        var before = gestureSeq;
+        return new Promise(function (resolve) {
+            var t0 = Date.now();
+            (function tick() {
+                if (gestureSeq > before || Date.now() - t0 > ms) return resolve(gestureSeq > before);
+                setTimeout(tick, 150);
+            })();
+        });
+    }
+    // 轮询统一取数。运行时快照必须在采样过程中抓：产品播放器可能在 12 秒窗口里
+    // 自己关掉（素材播完触发 vvOnEnded），事后读 VV.active.hls 会全是空。
+    function sample(ms, read) {
+        return new Promise(function (resolve) {
+            var cur = [], t0 = performance.now(), firstFrameAt = -1, snap = {};
+            (function tick() {
+                var s = read();
+                cur.push(s.level);
+                if (firstFrameAt < 0 && s.frame) firstFrameAt = Math.round(performance.now() - t0);
+                if (s.snap && s.snap.levels && s.snap.levels.length) snap = s.snap;
+                if (performance.now() - t0 < ms) return setTimeout(tick, SAMPLE_MS);
+                resolve({ cur: cur, firstFrameAt: firstFrameAt, snap: snap });
+            })();
+        });
+    }
+    function levelList(inst) {
+        if (!inst || !inst.levels) return [];
+        return inst.levels.map(function (l) { return l && (l.bitrate || l.attrs && l.attrs.BANDWIDTH) || 0; });
+    }
+    function levelOf(inst) {
+        if (!inst) return -1;
+        // 没起播时 currentLevel 可能还是初始值，loadLevel 才是 ABR 真正要拉的档
+        return inst.currentLevel >= 0 ? inst.currentLevel : inst.loadLevel;
+    }
+
+    // —— 裸臂：站点自己用 hls.js，参数保持常见默认值 ——
+    async function runSite(url, bw) {
+        var v = document.createElement('video');
+        v.muted = true; v.setAttribute('playsinline', ''); v.setAttribute('preload', 'auto');
+        v.setAttribute('autoplay', ''); v.loop = true;
+        stage.appendChild(v);
+        liveVideos.push(v);
+        var inst = null, err = '', playErr = '', maxRs = 0;
+        try {
+            inst = new Hls({ enableWorker: true, lowLatencyMode: false });
+            inst.attachMedia(v);
+            inst.loadSource(url);
+            try {
+                var pr = v.play();
+                if (pr && pr.catch) pr.catch(function (e) { playErr = String(e && e.message || e); });
+            } catch (eP) { playErr = String(eP && eP.message || eP); }
+        } catch (e) { err = String(e && e.message || e); }
+        var r = await sample(ARM_MS, function () {
+            if (v.readyState > maxRs) maxRs = v.readyState;
+            return { level: levelOf(inst), frame: !!(v && v.currentTime > 0 && v.videoWidth > 0),
+                snap: { levels: levelList(inst), autoCap: inst ? inst.autoLevelCapping : -99,
+                    videoHeight: v.videoHeight || 0 } };
+        });
+        var out = { kind: 'site', bw: bw, levels: r.snap.levels || [], cur: r.cur,
+            firstFrameAt: r.firstFrameAt, autoCap: r.snap.autoCap === undefined ? -99 : r.snap.autoCap,
+            videoHeight: r.snap.videoHeight || 0, err: err,
+            diag: { paused: v.paused, rs: v.readyState, maxRs: maxRs, ns: v.networkState,
+                ct: Math.round(v.currentTime * 100) / 100, vw: v.videoWidth, vh: v.videoHeight,
+                errCode: v.error ? v.error.code : 0, src: (v.src || '').slice(0, 48),
+                playErr: playErr, autoStartLoad: inst ? inst.autoStartLoad : null,
+                startLevelCfg: inst && inst.config ? inst.config.startLevel : null,
+                loadLevel: inst ? inst.loadLevel : null } };
+        var ix = liveVideos.indexOf(v); if (ix >= 0) liveVideos.splice(ix, 1);
+        try { if (inst) inst.destroy(); } catch (e0) {}
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e1) {}
+        try { stage.removeChild(v); } catch (e2) {}
+        return out;
+    }
+
+    // —— 产品臂：Via 注入的主脚本，配置由 vvHlsConfig() 决定 ——
+    async function runOurs(url, bw) {
+        var vv = window.__vv, err = '';
+        try { vv.close(); } catch (e0) {}
+        try { vv.open({ url: url, type: 'HLS', name: 'ABR 对照' }); }
+        catch (e) { err = String(e && e.message || e); }
+        var r = await sample(ARM_MS, function () {
+            var act = vv.VV && vv.VV.active;
+            var inst = act && act.hls;
+            var v = document.querySelector('.vv-player-video');
+            // 素材只有两片，播完会触发 vvOnEnded 把播放器关掉；loop 让 12s 窗口内实例一直在
+            if (v && !v.loop) { try { v.loop = true; } catch (eL) {} }
+            return { level: levelOf(inst), frame: !!(v && v.currentTime > 0 && v.videoWidth > 0),
+                snap: { levels: levelList(inst), autoCap: inst ? inst.autoLevelCapping : -99,
+                    capToSize: inst && inst.config ? !!inst.config.capLevelToPlayerSize : null,
+                    capOnFps: inst && inst.config ? !!inst.config.capLevelOnFPSDrop : null,
+                    startLevelCfg: inst && inst.config ? inst.config.startLevel : null,
+                    videoHeight: v ? (v.videoHeight || 0) : 0 } };
+        });
+        var s = r.snap;
+        var out = { kind: 'ours', bw: bw, levels: s.levels || [], cur: r.cur,
+            firstFrameAt: r.firstFrameAt, autoCap: s.autoCap === undefined ? -99 : s.autoCap,
+            videoHeight: s.videoHeight || 0, err: err,
+            capToSize: s.capToSize === undefined ? null : s.capToSize,
+            capOnFps: s.capOnFps === undefined ? null : s.capOnFps,
+            startLevelCfg: s.startLevelCfg === undefined ? null : s.startLevelCfg };
+        try { vv.close(); } catch (e3) {}
+        return out;
+    }
+
+    async function main() {
+        var expect = Q.get('expect') || '';
+        var ready = await untilReady();
+        send({ tag: 'env', version: window.__vv ? window.__vv.VV.version : 'none',
+            expect: expect, vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio,
+            hlsVer: window.Hls ? window.Hls.version : 'none' });
+        ok('脚本注入、调试句柄与裸 hls.js 都就绪', ready,
+            '__vv=' + !!window.__vv + ' Hls=' + (window.Hls ? window.Hls.version : 'none'));
+        ok('脚本版本与 dist 一致', !!window.__vv && window.__vv.VV.version === expect,
+            window.__vv ? window.__vv.VV.version : 'none');
+        if (!ready || !MASTER.low || !MASTER.high) {
+            send({ tag: 'done', pass: PASS, fail: FAIL, err: 'ready 或清单地址缺失' });
+            return;
+        }
+        await wait(400);   // 静置：页面解析与 GC 别和第一臂抢 CPU
+
+        // 顺序执行，两臂绝不共存：真机硬解码器有限，且产品打开时会治理页面上的其他 video
+        var order = [
+            { kind: 'site', bw: 'low' }, { kind: 'ours', bw: 'low' },
+            { kind: 'site', bw: 'high' }, { kind: 'ours', bw: 'high' }
+        ];
+        for (var i = 0; i < order.length; i++) {
+            var o = order[i];
+            if (o.kind === 'site') {
+                send({ tag: 'need-gesture', index: i });
+                var got = await waitGesture(8000);
+                ok('第 ' + (i + 1) + ' 臂拿到用户激活', got, got ? 'yes' : 'no（该臂数据无效）');
+            }
+            hud.textContent = '第 ' + (i + 1) + '/' + order.length + ' 臂：' + o.kind + ' / ' + o.bw;
+            var r = o.kind === 'site' ? await runSite(MASTER[o.bw], o.bw)
+                                     : await runOurs(MASTER[o.bw], o.bw);
+            r.tag = 'arm'; r.index = i;
+            send(r);
+            ok('第 ' + (i + 1) + ' 臂（' + o.kind + '/' + o.bw + '）解析出 4 档',
+                r.levels.length === 4, 'levels=' + r.levels.length);
+            await wait(400);
+        }
+        ok('页面无未捕获 JS 错误', ERRS.length === 0, ERRS.join(' | ') || 'none');
+        hud.textContent = '完成';
+        send({ tag: 'done', pass: PASS, fail: FAIL, errs: ERRS });
+    }
+    main().catch(function (e) {
+        send({ tag: 'done', pass: PASS, fail: FAIL, err: String(e && e.message || e) });
+    });
+})();
+</script>
+</body>
+</html>

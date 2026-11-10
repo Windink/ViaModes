@@ -58,6 +58,14 @@ function vvMain() {
                 epNum: vvEpNum,
                 epTemplate: vvEpTemplate,
                 badge: vvToggleBadge,
+                // 角标数字防抖的现场：真机上验「连续变化不刷、稳定后一次到位」
+                showBadgeNew: vvShowBadgeNew,
+                badgeNum: function () {
+                    try {
+                        var b = vvUI.badge && vvUI.badge.querySelector('.vv-badge-num');
+                        return b ? b.textContent : '';
+                    } catch (e) { return ''; }
+                },
                 // 网页铺满（原名页面全屏）：现场状态与手动开关
                 pageFs: vvPageFsState,
                 pageFsSet: vvPageFsSet,

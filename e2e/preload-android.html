@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>预载补扫开销 · Via 真机量化</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: pre-wrap; }
+  /* 造出来的媒体元素不能占版面，也不能被浏览器真的解码 */
+  #pen { position: absolute; left: -9999px; top: 0; width: 1px; height: 1px; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="hud">测量中…</div>
+<h1>3 秒预载补扫 · 真机量化</h1>
+<p>问题：<code>vvStartPreloadGuard</code> 每 3 秒跑一次 <code>vvStopPagePreload()</code>，
+里面 <code>querySelectorAll('video,audio')</code> 全量遍历，命中已按住的元素还要走
+<code>vvPreHeldIndexOf</code> 的线性查找。这里只出数，不改产品代码：量不同页面规模下的
+稳态单次耗时，以及 3 秒一跳会不会造成可观测掉帧，再决定要不要动它。</p>
+<div id="pen"></div>
+
+<script>
+// 测量口径（写在页面里，驱动按同一套门槛判）
+//  · 单次 < 8ms（半帧 @60Hz）、占空比 < 0.5%（8ms / 3000ms）→ 判定无感，不改
+//  · rAF 长帧 >25ms 算跳帧；补扫臂与对照臂交替两对，看增量而不是绝对值
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var pen = document.getElementById('pen');
+    var RUN = (/preload-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var PASS = 0, FAIL = 0, ERRS = [];
+    var STEPS = [0, 10, 50, 200];   // 页面上额外挂着的媒体元素数
+    var LOOPS = 50;                 // 热扫循环次数：单次可能低于计时精度，循环后除以次数
+    var GROUPS = 5;                 // 每个规模重复几组，取中位
+    var els = [];                   // 测试台自己造的元素，用来模拟「站点把 src 装回来」
+
+    window.addEventListener('error', function (e) {
+        ERRS.push(String(e && (e.message || (e.error && e.error.message)) || 'unknown'));
+    });
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    // 一进页面就留脚印：能分清「JS 没跑」和「脚本没注入」
+    send({ tag: 'boot', href: location.href.slice(0, 200) });
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function ok(name, cond, detail) {
+        var p = !!cond;
+        if (p) PASS++; else FAIL++;
+        send({ tag: 'ok', name: name, pass: p, detail: String(detail || '') });
+        return p;
+    }
+    function hudText(s) { try { hud.textContent = s; } catch (e) {} }
+    function median(a) {
+        var b = a.slice().sort(function (x, y) { return x - y; });
+        return b.length ? b[Math.floor(b.length / 2)] : -1;
+    }
+    function p95(a) {
+        var b = a.slice().sort(function (x, y) { return x - y; });
+        return b.length ? b[Math.min(b.length - 1, Math.floor(b.length * 0.95))] : -1;
+    }
+    function untilReady() {
+        return new Promise(function (resolve) {
+            var n = 0;
+            (function tick() {
+                if (window.__vv && window.__vv.VV) return resolve(window.__vv);
+                if (++n > 120) return resolve(null);
+                setTimeout(tick, 200);
+            })();
+        });
+    }
+
+    // 用 data: URI 当 src：vvStopPagePreload 只看 getAttribute('src') 有没有值，
+    // 这样能走完整条按住链路，又不会发出 200 个真实网络请求污染测量。
+    var FAKE_SRC = 'data:,';
+    function addEls(n) {
+        for (var i = 0; i < n; i++) {
+            var v = document.createElement('video');
+            v.setAttribute('preload', 'none');
+            v.setAttribute('src', FAKE_SRC);
+            pen.appendChild(v);
+            els.push(v);
+        }
+    }
+    function reattach() {
+        for (var i = 0; i < els.length; i++) {
+            try { els[i].setAttribute('src', FAKE_SRC); } catch (e) {}
+        }
+    }
+    // 计时精度：量「performance.now() 跳一格要多久」。
+    // 别用「相邻两次读数的最小非零差」：WebView 把 now() 量化到 0.1ms，
+    // 几十次循环里两次读数完全一样，会被当成「计时器不可用」误报。
+    function timerRes() {
+        var a = performance.now(), n = 0;
+        while (performance.now() === a && n < 20000) n++;
+        return Math.round((performance.now() - a) * 1000) / 1000;
+    }
+    function timeLoop(fn, loops) {
+        var a = performance.now();
+        for (var i = 0; i < loops; i++) fn();
+        return (performance.now() - a) / loops;
+    }
+
+    // rAF 采样：withSweep=true 时按产品同样的 3 秒节奏补扫一次，
+    // 反之纯空转。交替两对，避免把设备负载漂移当成补扫的锅。
+    function sampleRaf(ms, withSweep) {
+        return new Promise(function (resolve) {
+            var gaps = [], last = 0, t0 = performance.now(), timer = 0;
+            if (withSweep) {
+                timer = setInterval(function () {
+                    try { window.__vv.stopPagePreload(); } catch (e) {}
+                }, 3000);
+            }
+            function tick(t) {
+                if (last) gaps.push(t - last);
+                last = t;
+                if (performance.now() - t0 < ms) return requestAnimationFrame(tick);
+                if (timer) clearInterval(timer);
+                var long = gaps.filter(function (g) { return g > 25; });
+                resolve({ long: long.length, total: gaps.length,
+                    max: gaps.length ? Math.round(Math.max.apply(null, gaps) * 100) / 100 : -1,
+                    med: gaps.length ? Math.round(median(gaps) * 100) / 100 : -1 });
+            }
+            requestAnimationFrame(tick);
+        });
+    }
+
+    async function main() {
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        var vv = await untilReady();
+        send({ tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio, res: timerRes() });
+        ok('脚本版本与 dist 一致', !!vv && vv.VV.version === expect, vv ? vv.VV.version : 'none');
+        if (!vv) { send({ tag: 'done', pass: PASS, fail: FAIL, err: 'no __vv' }); return; }
+        ok('__vv.stopPagePreload 可用', typeof vv.stopPagePreload === 'function' &&
+            typeof vv.preloadState === 'function', typeof vv.stopPagePreload);
+        ok('performance.now 有可读的分辨率（>= 0.01ms）', timerRes() >= 0.01, timerRes() + 'ms');
+
+        // 页面解析、样式计算、GC 都会和首轮抢 CPU：先静置，否则冷轮会漂
+        await wait(400);
+
+        var made = 0, abortsBefore = (vv.preloadState().aborts || 0);
+        for (var s = 0; s < STEPS.length; s++) {
+            var add = STEPS[s] - made;
+            if (add > 0) addEls(add);
+            made = STEPS[s];
+            hudText('规模 ' + made + ' 个媒体元素 · 测量中');
+            await wait(150);
+
+            // 冷扫：新元素第一次被按住，只可能发生一次，量原始单次值
+            var cold = -1;
+            try {
+                var a = performance.now();
+                vv.stopPagePreload();
+                cold = performance.now() - a;
+            } catch (e) {}
+            var aborts = (vv.preloadState().aborts || 0) - abortsBefore;
+
+            // 热扫 A（常态）：src 已被摘掉，元素会被 `if (!src) continue` 提前跳过
+            var idle = [], busy = [];
+            for (var g = 0; g < GROUPS; g++) {
+                idle.push(timeLoop(function () { vv.stopPagePreload(); }, LOOPS));
+                // 热扫 B（最坏）：站点每轮把 src 装回来，强制走到 vvPreHeldIndexOf 线性查找
+                reattach();
+                busy.push(timeLoop(function () { vv.stopPagePreload(); }, LOOPS));
+                await wait(60);
+            }
+            send({ tag: 'measure', n: made, cold: Math.round(cold * 1000) / 1000,
+                aborts: aborts, idle: idle.map(function (x) { return Math.round(x * 1000) / 1000; }),
+                busy: busy.map(function (x) { return Math.round(x * 1000) / 1000; }),
+                idleMed: Math.round(median(idle) * 1000) / 1000,
+                busyMed: Math.round(median(busy) * 1000) / 1000,
+                busyP95: Math.round(p95(busy) * 1000) / 1000 });
+            ok('规模 ' + made + '：拿到冷/热扫耗时', cold >= 0 && idleMedOf(idle) >= 0 &&
+                idleMedOf(busy) >= 0, 'cold=' + cold.toFixed(3) + 'ms');
+        }
+        function idleMedOf(a) { return median(a); }
+
+        ok('冷扫按住了新挂上的媒体（aborts 与新增数一致）',
+            (vv.preloadState().aborts || 0) - abortsBefore >= made - STEPS[0],
+            'aborts+' + ((vv.preloadState().aborts || 0) - abortsBefore) + ' 新增 ' + made);
+
+        // rAF 对照：off / on / off / on，两对配对
+        hudText('rAF 长帧 A/B（各 7s × 4 臂）');
+        var order = ['off', 'on', 'off', 'on'];
+        for (var k = 0; k < order.length; k++) {
+            var on = order[k] === 'on';
+            var r = await sampleRaf(7000, on);
+            r.tag = 'raf'; r.phase = order[k]; r.pair = Math.floor(k / 2);
+            send(r);
+            ok('rAF 第 ' + (k + 1) + ' 臂采到足够帧（' + order[k] + '）', r.total >= 60,
+                'total=' + r.total + ' long=' + r.long + ' med=' + r.med + 'ms');
+            hudText('rAF ' + (k + 1) + '/4 完成 · long=' + r.long);
+        }
+
+        ok('页面无未捕获 JS 错误', ERRS.length === 0, ERRS.join(' | ') || 'none');
+        hudText('完成');
+        send({ tag: 'done', pass: PASS, fail: FAIL, errs: ERRS });
+    }
+    main().catch(function (e) {
+        send({ tag: 'done', pass: PASS, fail: FAIL, err: String(e && e.message || e) });
+    });
+})();
+</script>
+</body>
+</html>

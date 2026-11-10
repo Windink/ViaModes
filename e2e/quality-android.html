@@ -100,6 +100,25 @@
         hud.textContent = 'hasHls=' + (!!inst) + ' levels=' +
             ((inst && inst.levels) ? inst.levels.length : 0) + ' autoCap=' +
             (inst ? inst.autoLevelCapping : -99);
+
+        // 角标数字防抖：连续变化时数字不动，安静 400ms 后一次刷到最终值。
+        // 放在最后做，会替换 VV.items，别影响前面的画质断言。
+        try {
+            vv.close();
+            vv.VV._panelOpen = false;
+            vv.VV._badgeNumShown = null;
+            if (vv.VV._badgeNumTimer) { clearTimeout(vv.VV._badgeNumTimer); vv.VV._badgeNumTimer = 0; }
+            vv.VV.items = [{ url: 'a' }, { url: 'b' }, { url: 'c' }, { url: 'd' }, { url: 'e' }];
+            vv.showBadgeNew();
+            var n0 = vv.badgeNum();
+            vv.VV.items.push({ url: 'f' }, { url: 'g' });
+            vv.showBadgeNew();
+            vv.showBadgeNew();
+            var n1 = vv.badgeNum();
+            await wait(650);
+            send({ tag: 'badge', first: n0, during: n1, final: vv.badgeNum(),
+                shown: vv.VV._badgeNumShown });
+        } catch (eB) { send({ tag: 'badge', err: String(eB && eB.message || eB) }); }
         send({ tag: 'done' });
     }
     main().catch(function (e) { send({ tag: 'done', err: String(e && e.message || e) }); });

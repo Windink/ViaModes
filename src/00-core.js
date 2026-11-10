@@ -50,6 +50,9 @@ var VV = {
     hlsRoots: {},
     hlsMasterRoots: {},
     badge: null,
+    // 角标数字防抖：当前显示值 + 待落地的定时器（见 vvShowBadgeNew）
+    _badgeNumShown: null,
+    _badgeNumTimer: 0,
     playerActive: false,
     _panelOpen: false,
     uiBuilt: false,

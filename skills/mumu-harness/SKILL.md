@@ -106,6 +106,9 @@ function send(o) {
 | --- | --- | --- |
 | 断言数量对不上、出现上一轮的条目 | 没按 `run` 过滤 | 驱动侧 `.filter(r => r.run === pageTag)` |
 | 一条上报都没有 | 脚本没注入（多为 BLOB 或没换版） | 先 `mumu-deploy`，再看 `mumu-diagnose` |
+| **只有 `boot` 一行，后面全无；Via 还退回桌面** | 开完页后驱动再不碰 adb，本机 daemon 随 adb 进程结束被回收，`reverse` 跟着清空，页面后续 `fetch('/__report')` 全被 `send()` 的 try/catch 静默吞掉 | 轮询等待期间**每 2 秒重建一次 reverse**（`if (i % 4 === 0) sh(['reverse', ...])`），顺便把 daemon 拽住；`assets/driver-template.mjs` 已内置。诊断时先发 `boot` 就能分清「JS 没跑」和「通道断了」 |
+| 页面自建 video 播不起来：`play() rejected: page autoplay blocked`，但产品播放器正常 | Via 的自动播放解锁**有时效**：刚点过屏能播，隔几十秒再新建 video 又被挡；产品播放器有自己的手势解锁，两臂起跑线不同 | 每个要起播的臂开始前，页面发 `need-gesture`、驱动 `input tap` 造真实用户激活；合成 `click()` 不算激活。别只在开页时点一次 |
+| 播放器在观察窗内自己关掉，事后读运行时实例全是空 | 素材播完触发 `vvOnEnded` / 关闭逻辑 | 运行时快照在**采样回调里抓**（保留最后一次有效值），别等跑完再读；或给 video 设 `loop`。对照臂没出画时必须判本轮无效，否则会拿初始 `currentLevel` 当 ABR 结果 |
 | 驱动卡满超时 | 页面侧抛异常但没发 `done` | 包 `try/catch` → `fatal` + `done(aborted)` |
 | 改了测试页却还是旧断言 | Via 按 URL 路径缓存 | 每轮换一次性后缀 + serve 别名映射 |
 | 截图是空白/上一帧 | 没等合成 / 浮层不进系统截图 | 先发 `hold`，等 2.5s 再抓；结论仍以 DOM 断言为准 |

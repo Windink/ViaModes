@@ -95,6 +95,13 @@ try {
     let done = false;
     for (let i = 0; i < POLLS; i++) {
         await sleep(500);
+        // 保活：开完页若再不碰 adb，本机 daemon 会被回收、reverse 跟着清空，
+        // 页面后续 fetch('/__report') 全部静默失败，上报里只剩一条 boot。
+        // 每 2 秒重建一次映射，顺便把 daemon 拽住（长窗口套件尤其需要）。
+        if (i % 4 === 0) {
+            sh(['reverse', `tcp:${PORT}`, `tcp:${PORT}`]);
+            sh(['reverse', `tcp:${SLOW_PORT}`, `tcp:${SLOW_PORT}`]);
+        }
         if (readRows().filter((r) => r.run === pageTag).some((r) => r.tag === 'done')) { done = true; break; }
     }
     const rows = readRows().filter((r) => r.run === pageTag);
