@@ -103,6 +103,11 @@ function vvMain() {
                         fragMs: a._fragMs || 0,
                         fragAgo: a._fragLoadedAt ? now - a._fragLoadedAt : -1,
                         loading: !!a._fragLoadingSince,
+                        // 清单在飞 / 最近一次真的有字节到账（直连 mp4 也能看到）
+                        manif: !!a._manifLoadingSince,
+                        netAgo: a._netAt ? now - a._netAt : -1,
+                        flow: (function () { try { return vvNetFlow(a, now); } catch (eF) { return -1; } })(),
+                        wdogAge: a._wdogT0 ? Math.round((now - a._wdogT0) / 1000) : 0,
                         rx: VID ? VID.readyState : -1,
                         t: VID ? +(VID.currentTime || 0).toFixed(2) : -1
                     };

@@ -5,6 +5,8 @@ function vvHlsNudge(inst) {
         // 有分片正在加载时绝对不要 startLoad：那会中断当前请求。
         // 冷门 CDN 的分片首字节可能要 30s+，反复打断会让 seek 永远失败。
         if (inst && VV.active._fragLoadingSince && now - VV.active._fragLoadingSince < 45000) return;
+        // 清单还没下来时同理：startLoad 会把在飞的清单请求打断，弱网下等于从头再要一次
+        if (inst && VV.active._manifLoadingSince && now - VV.active._manifLoadingSince < 30000) return;
         // 同一个卡顿不要频繁 startLoad，否则会反复中断分片请求
         if (VV.active._lastNudge && now - VV.active._lastNudge < 15000) return;
         VV.active._lastNudge = now;
@@ -97,6 +99,9 @@ function vvStartWatchdog() {
                 // 分片还在正常加载（只是慢）就不要提示“卡住”并打断它
                 var fragBusy2 = VV.active._fragLoadingSince && Date.now() - VV.active._fragLoadingSince < 45000;
                 if (fragBusy2) return;
+                // 直连 mp4 没有分片事件，用同一套"字节在涨"的证据：
+                // 慢速下载时 readyState 会在 2 停留很久，那不是卡住，是还没下够。
+                if (vvNetFlow(VV.active, Date.now()) >= 2) return;
                 VV.active._lastT = -1;
                 vvToast('播放卡住，自动恢复中…');
                 vvHlsNudge(VV.active.hls);

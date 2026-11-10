@@ -784,10 +784,74 @@ function vvHideErr() {
     try { if (ERRBOX) ERRBOX.classList.remove('on'); } catch (e) {}
 }
 
+// 起播预算：先等 12s 才第一次判断，之后每次续命 5~6s，总上限 120s。
+// 为什么不是"等 12s 要么播要么报错"：1080P 的一片常见 2~6MB，弱网（2G/限速 WiFi/跨境线路）
+// 下 12s 连元数据都拿不到是常态，而错误卡片会把加载进度环顶掉，用户看到的是"播不了"，
+// 十几秒后视频又自己播起来——最典型的 CDN 抖动（TCP 不死不断、停 20 秒）就能稳定复现。
+var VV_WDOG_FIRST_MS = 12000;
+var VV_WDOG_STEP_MS = 6000;
+// 只有「弱证据」（连接还开着、请求还在飞、但一个字节都没来）时最多等这么久，
+// 超过就认定流真的死了；有字节持续增长的「强证据」可以一路等到总上限。
+var VV_WDOG_WEAK_S = 45;
+// 但"一个字节都没来过"和"来过字节、只是慢"要分开算：4KB/s 的线路拉 1MB mp4，
+// 一次 progress 事件都不发、元数据 40 秒才到也照样能播（实测）。已经确认链路通了的，
+// 就按总上限等，别在它马上要出画的时候弹卡片。
+var VV_WDOG_NET_S = 100;
+var VV_WDOG_MAX_S = 120;
+
+// "数据还在往下走"的证据等级：0 = 一点动静都没有，1 = 请求还在飞（弱），2 = 确实有字节进来（强）。
+// 这份判据必须覆盖直连 mp4 —— hls 的 _fragLoadingSince/_fragLoadedAt 只有 hls.js 的事件会写，
+// 直连 mp4 永远没有这两个标记，旧版看门狗等于对 mp4 完全瞎掉，慢一点就判死。
+function vvNetFlow(act, nowMs) {
+    try {
+        if (!act) return 0;
+        var now = nowMs || Date.now();
+        if (VID && VID.error) return 0;
+        // 强证据：最近 6s 内有字节到账（分片下载完成 / 清单下载完成 / mp4 的 progress 增长）
+        if (act._netAt && now - act._netAt < 6000) return 2;
+        // 弱证据：请求在飞。hls 的分片有 45s 宽限（超过就该由 hls 自己 abort 重试），
+        // 清单/子清单 30s（弱网下第一个 m3u8 跳两级子清单很常见）。
+        if (act._fragLoadingSince && now - act._fragLoadingSince < 45000) return 1;
+        if (act._manifLoadingSince && now - act._manifLoadingSince < 30000) return 1;
+        // 直连 mp4 / 原生 HLS：networkState=2 就是"浏览器还在向网络要数据"，
+        // 没有 error 说明连接没被判死，值得再等（但只算弱证据，有总上限兜着）。
+        if (VID && VID.networkState === 2) return 1;
+        return 0;
+    } catch (e) {
+        return 0;
+    }
+}
+
+// 续命期间把加载环留住并改文案：这时候"还在下"本身就是最重要的反馈，
+// 把进度环换成错误卡片（旧行为）等于对着一个还在下载的视频说播不了。
+function vvMarkLoadingSlow() {
+    try {
+        if (!LOADING) return;
+        var on = LOADING.classList.contains('on');
+        if (!on) vvShowLoading('网络较慢，仍在加载…');
+        var tx = LOADING.querySelector('.vv-load-text');
+        if (tx && tx.textContent !== '网络较慢，仍在加载…') tx.textContent = '网络较慢，仍在加载…';
+        vvShowLoadBar(true);
+        vvStartLoadTick();
+        vvUpdateLoadProgress();
+        // 没有总长度时（moov 都还没到 / HLS 还没缓冲）detail 是空的，
+        // 这时给出已下载字节，用户至少能看到数字在涨、不是死在这里。
+        var det = LOADING.querySelector('.vv-load-detail');
+        if (det && !det.textContent) {
+            var gotB = (VV.active && VV.active._loaded) || 0;
+            if (gotB > 0) det.textContent = '已下载 ' + vvFmtBytes(gotB);
+        }
+    } catch (e) {}
+}
+
 // 起播看门狗：打开后一段时间仍没有画面数据 → 给错误卡片，而不是让用户对着黑屏
-function vvArmStartWatchdog() {
+// 但"没画面"分三种：还在下（续命）、解码器抢不到（自救）、流真死了（报错）。
+// delay 只给测试用（smoke 里跑 10ms 的假预算）。
+function vvArmStartWatchdog(delay) {
     try {
         if (VV._startWdog) { clearTimeout(VV._startWdog); VV._startWdog = null; }
+        var armAct = VV.active;
+        if (armAct && !armAct._wdogT0) armAct._wdogT0 = Date.now();
         VV._startWdog = setTimeout(function () {
             VV._startWdog = null;
             try {
@@ -796,23 +860,29 @@ function vvArmStartWatchdog() {
                 var act = VV.active || {};
                 var netFail = act._netFail || 0;
                 var code = act._lastHttpCode || 0;
-                // 数据还在往下走就先别判死。
-                // 1080P 站点的一片常见 2~6MB，弱网下 12s 拿不到完整首片很正常；以前这里
-                // 一律按"解码器抢不到"处理，会销毁 hls 再从零重下，用户看到的是空转十几秒，
-                // 而且每次重下又从头开始——真机上"插件比网页慢一大截"多半是这一条。
-                // 判据用「分片正在下」或「10s 内刚下到过分片」，只放宽两次（最多再等 24s）。
                 var nowMs = Date.now();
-                var fragBusy = act._fragLoadingSince && nowMs - act._fragLoadingSince < 45000;
-                var fragFresh = act._fragLoadedAt && nowMs - act._fragLoadedAt < 10000;
-                if ((fragBusy || fragFresh) && (act._wdogExtend || 0) < 2) {
+                var t0 = act._wdogT0 || nowMs;
+                var elapsed = (nowMs - t0) / 1000;
+                // 源站明说不行（4xx / 连续多次连不上）就不等了：那不是"慢"，是拒绝。
+                var dead = code >= 400 || netFail >= 3;
+                var flow = dead ? 0 : vvNetFlow(act, nowMs);
+                var strong = flow >= 2;
+                // 有没有确认过"链路是通的"：收到过字节、或元数据已经解析出来。
+                // 通了的按 VV_WDOG_NET_S 等，完全没动静的按 VV_WDOG_WEAK_S 判死。
+                var gotAny = !!act._netAt || (act._loaded || 0) > 0 || (VID.readyState >= 1);
+                var weakCap = gotAny ? VV_WDOG_NET_S : VV_WDOG_WEAK_S;
+                var keep = !dead && elapsed < VV_WDOG_MAX_S && (strong || (flow === 1 && elapsed < weakCap));
+                if (keep) {
                     act._wdogExtend = (act._wdogExtend || 0) + 1;
                     VV._startWdogExtend = (VV._startWdogExtend || 0) + 1;
-                    vvArmStartWatchdog();
+                    vvMarkLoadingSlow();
+                    vvArmStartWatchdog(strong ? VV_WDOG_STEP_MS : VV_WDOG_STEP_MS - 1000);
                     return;
                 }
-                // 已经拿到元数据/分片，却一直没出画面：先按"解码器抢不到"自救，
-                // 别把这种情形误报成"防盗链/地址失效"。
-                if (VID.readyState >= 1 && !act._blobOnly && !act._nativeTried) {
+                // 数据确实不流了，却已经拿到元数据：这时才按"解码器抢不到"自救。
+                // 数据还在走的慢资源不会走到这里，所以不会再把"慢"当解码器故障、
+                // 销毁 hls 从零重下（旧行为在弱网下等于每 12s 自毁一次）。
+                if (flow === 0 && !dead && VID.readyState >= 1 && !act._blobOnly && !act._nativeTried) {
                     if (vvCodecRescue('watchdog')) return;
                     vvShowErr('设备的硬件解码器被占满了：同时打开的视频页签太多，系统没有空闲解码器给这一页。\n关掉 2～3 个视频页签后再点播放即可。', '解码器不够用');
                     return;
@@ -823,11 +893,12 @@ function vvArmStartWatchdog() {
                 } else if (act._blobOnly) {
                     why = '该页面只用浏览器内部的视频流（blob），离开页面上下文就无法播放。';
                 } else {
-                    why = '长时间没有拿到画面数据。可能是防盗链、需要登录，或线路暂时不可用。';
+                    why = '长时间没有拿到画面数据。可能是防盗链、需要登录，或线路暂时不可用。'
+                        + (elapsed >= VV_WDOG_MAX_S ? '（已等待 ' + Math.round(elapsed) + ' 秒）' : '');
                 }
                 vvShowErr(why, '这个视频源播不了');
             } catch (eW) {}
-        }, 12000);
+        }, delay || VV_WDOG_FIRST_MS);
     } catch (e) {}
 }
 
@@ -1215,6 +1286,11 @@ function vvLoadMedia(item) {
         VV.active._fragBytesSum = 0;
         VV.active._fragLoadingSince = 0;
         VV.active._fragLoadedAt = 0;
+        // 起播看门狗的判据全部重置：换源/重建是一次全新的起播，不能带着上一轮的
+        // "刚下到过数据"记录，否则新地址明明没动静也会被续命拖到总上限。
+        VV.active._netAt = 0;
+        VV.active._manifLoadingSince = 0;
+        VV.active._wdogT0 = 0;
         VV.active._wdogExtend = 0;
         VV.active._loaded = 0;
         VV.active._total = 0;
@@ -1272,6 +1348,34 @@ function vvLoadMedia(item) {
                 var hlsErr = hlsCtor.ErrorTypes || {};
                 var inst = vvTrackHls(new hlsCtor(vvHlsConfig()));
                 VV.active.hls = inst;
+                // 清单/子清单阶段也是"请求在飞"：弱网下主清单跳两级子清单能磨十几秒，
+                // 这段时间 fMP4/TS 一个分片都还没开始下，只有 FRAG_* 事件时看门狗等于瞎的。
+                // 这里补上 MANIFEST_* / LEVEL_* 的在飞标记，并算作"有数据到账"。
+                var manifBusy = ['MANIFEST_LOADING', 'LEVEL_LOADING', 'AUDIO_TRACK_LOADING'];
+                var manifDone = ['MANIFEST_LOADED', 'LEVEL_LOADED', 'AUDIO_TRACK_LOADED'];
+                manifBusy.forEach(function (en) {
+                    if (!hlsEv[en]) return;
+                    inst.on(hlsEv[en], function () {
+                        try { if (VV.active) VV.active._manifLoadingSince = Date.now(); } catch (eMn0) {}
+                    });
+                });
+                manifDone.forEach(function (en) {
+                    if (!hlsEv[en]) return;
+                    inst.on(hlsEv[en], function () {
+                        try {
+                            if (VV.active) {
+                                VV.active._manifLoadingSince = 0;
+                                VV.active._netAt = Date.now();
+                            }
+                        } catch (eMn1) {}
+                    });
+                });
+                ['MANIFEST_LOAD_ERROR', 'MANIFEST_LOAD_TIMEOUT', 'LEVEL_LOAD_ERROR', 'LEVEL_LOAD_TIMEOUT'].forEach(function (en) {
+                    if (!hlsEv[en]) return;
+                    inst.on(hlsEv[en], function () {
+                        try { if (VV.active) VV.active._manifLoadingSince = 0; } catch (eMn2) {}
+                    });
+                });
                 if (hlsEv.MANIFEST_PARSED) inst.on(hlsEv.MANIFEST_PARSED, function () {
                     try {
                         VV.active._netFail = 0;
@@ -1308,6 +1412,7 @@ function vvLoadMedia(item) {
                             // 记录"最近一次真的拿到分片"的时刻：起播看门狗用它区分
                             // 「网络慢但数据在走」和「流根本没动静」
                             VV.active._fragLoadedAt = Date.now();
+                            VV.active._netAt = Date.now();
                             VV.active._netFail = 0;
                             VV.active._mediaFail = 0;
                             VV.active._hlsRetried = false;
@@ -1651,6 +1756,7 @@ function vvResumeTarget(d, duration) {
 function vvBindVideo() {
     VID.addEventListener('loadedmetadata', function () {
         try {
+            if (VV.active) VV.active._netAt = Date.now();
             var d = VV.active && VV.active.resumeInfo;
             var dur = (VID.duration && isFinite(VID.duration)) ? VID.duration : 0;
             var maxT = dur ? Math.max(0, dur - 0.1) : 0;
@@ -1677,6 +1783,7 @@ function vvBindVideo() {
     VID.addEventListener('progress', function (e) {
         try {
             if (!VV.active) return;
+            var prevLoaded = VV.active._loaded || 0;
             if (e && e.lengthComputable && e.total > 0) {
                 VV.active._total = e.total;
                 VV.active._loaded = e.loaded;
@@ -1685,6 +1792,9 @@ function vvBindVideo() {
                 VV.active._loaded = e.loaded;
                 vvTrackSpeed(e.loaded);
             }
+            // 字节在涨 = 强证据：起播看门狗据此续命。
+            // 直连 mp4 没有 hls 的分片事件，这个标记是它唯一的"还在下"信号。
+            if ((VV.active._loaded || 0) > prevLoaded) VV.active._netAt = Date.now();
             vvUpdateLoadProgress();
         } catch (eP) {}
     });

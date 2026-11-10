@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;}};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;},netFlow:vvNetFlow,armWdog:vvArmStartWatchdog,disarmWdog:vvDisarmStartWatchdog,markSlow:vvMarkLoadingSlow};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -1416,6 +1416,108 @@ T.saveNow();
 eq('没播完照常记位置', (T.progMap()['kEnded'] || {}).t, 5);
 T.setVid(null);
 T.setActive(null);
+
+// ---- 慢资源：起播看门狗别把「只是慢」判成「播不了」 ----
+// 现场：CDN 抖一下（TCP 不死不断、停 20 秒），旧版 12s 一到就弹「这个视频源播不了」，
+// 数据恢复后又自己播起来；弱网 mp4 更惨——"数据在走"的判据只有 hls 的分片事件，
+// 直连 mp4 永远没有那两个标记，于是慢一点就被当解码器故障销毁重建、从 0 重下。
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function wdogVid(rs, ns) {
+    return { readyState: rs, networkState: ns, error: null, currentTime: 0, paused: true,
+        load() {}, pause() {}, play() { return Promise.resolve(); }, addEventListener() {}, contains() { return false; } };
+}
+{
+    const wv = wdogVid(0, 2);
+    T.setVid(wv);
+    T.setPlayerActive(true);
+    // 强证据：最近有字节到账（分片下完 / 清单下完 / mp4 progress 涨）
+    T.setActive({ item: { type: 'MP4' }, _netAt: Date.now() });
+    eq('刚有字节到账 → 强证据', T.netFlow(T.VV.active), 2);
+    // 弱证据：连接还开着在要数据，但一个字节都没来
+    T.setActive({ item: { type: 'MP4' } });
+    eq('连接还在要数据 → 弱证据', T.netFlow(T.VV.active), 1);
+    // 弱证据：hls 分片在飞 / 清单在飞（弱网下第一个 m3u8 要按秒算）
+    T.setActive({ item: { type: 'HLS' }, _fragLoadingSince: Date.now() });
+    eq('分片正在下载 → 弱证据', T.netFlow(T.VV.active), 1);
+    T.setActive({ item: { type: 'HLS' }, _manifLoadingSince: Date.now() });
+    eq('清单正在下载 → 弱证据', T.netFlow(T.VV.active), 1);
+    // 元素自己报了错（403 / 解码失败）：再等也没意义
+    wv.error = { code: 4 };
+    T.setActive({ item: { type: 'MP4' }, _netAt: Date.now() });
+    eq('元素已报错 → 不算证据', T.netFlow(T.VV.active), 0);
+    wv.error = null;
+    wv.networkState = 0;
+    T.setActive({ item: { type: 'MP4' } });
+    eq('既没连接也没字节 → 无证据', T.netFlow(T.VV.active), 0);
+
+    // 慢速下载：续命而不是报错，也不许当成解码器故障
+    wv.readyState = 1; wv.networkState = 2;
+    T.setActive({ item: { type: 'MP4' }, _netAt: Date.now(), _rescue: 0, _wdogT0: Date.now() });
+    const extBefore = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('慢资源：看门狗续命而不是判死', (T.VV._startWdogExtend || 0) - extBefore, 1);
+    eq('慢资源：不触发解码器自救', T.VV.active._rescue, 0);
+    eq('续命时留了现场（续命次数记在 active 上）', T.VV.active._wdogExtend, 1);
+    T.disarmWdog();
+
+    // 一点动静都没有：立刻走错误路径，不续命
+    wv.readyState = 0; wv.networkState = 0;
+    T.setActive({ item: { type: 'MP4' }, _netAt: 0, _rescue: 0, _wdogT0: Date.now() });
+    const extDead = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('完全没动静：不续命', (T.VV._startWdogExtend || 0) - extDead, 0);
+    eq('完全没动静：不走解码器自救（元数据都没到）', T.VV.active._rescue, 0);
+    T.disarmWdog();
+
+    // 一个字节都没来过：弱证据最多等 45s，不能对"假活"无限等
+    wv.readyState = 0; wv.networkState = 2;
+    T.setActive({ item: { type: 'MP4' }, _netAt: 0, _loaded: 0, _rescue: 0, _wdogT0: Date.now() - 46000 });
+    const extWeak = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('一个字节都没来且超过 45s：不再续命', (T.VV._startWdogExtend || 0) - extWeak, 0);
+    eq('弱证据超时不算解码器故障', T.VV.active._rescue, 0);
+    T.disarmWdog();
+
+    // 但元数据都已经解析出来了（链路确认是通的，只是慢）：45s 之后照样续命。
+    // 4KB/s 拉 1MB mp4 实测就是 40 秒才出元数据，卡片会正好弹在它马上要出画的时候。
+    wv.readyState = 1; wv.networkState = 2;
+    T.setActive({ item: { type: 'MP4' }, _netAt: 0, _loaded: 0, _rescue: 0, _wdogT0: Date.now() - 46000 });
+    const extSlow = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('元数据已到只是慢：45s 之后仍续命', (T.VV._startWdogExtend || 0) - extSlow, 1);
+    T.disarmWdog();
+
+    // 强证据也有总上限：120s 之后必须给用户一个结论
+    T.setActive({ item: { type: 'MP4' }, _netAt: Date.now(), _rescue: 0, _wdogT0: Date.now() - 125000 });
+    const extCap = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('总上限 120s：强证据也不再续命', (T.VV._startWdogExtend || 0) - extCap, 0);
+    T.disarmWdog();
+
+    // 源站明说 403：不是"慢"，立刻判死，有数据也不再等
+    T.setActive({ item: { type: 'MP4' }, _netAt: Date.now(), _lastHttpCode: 403, _rescue: 0, _wdogT0: Date.now() });
+    const ext403 = T.VV._startWdogExtend || 0;
+    T.armWdog(10);
+    await sleep(60);
+    eq('HTTP 403：有字节也不续命', (T.VV._startWdogExtend || 0) - ext403, 0);
+    T.disarmWdog();
+
+    // 数据确实不流了、但元数据到了 → 这时才按"解码器抢不到"自救
+    wv.readyState = 1; wv.networkState = 1;
+    T.setActive({ item: { url: 'https://cdn.a.com/x.mp4', type: 'MP4' }, _netAt: 0, _rescue: 0, _wdogT0: Date.now() });
+    T.armWdog(10);
+    await sleep(60);
+    eq('数据不流了且已拿到元数据：才走解码器自救', T.VV.active._rescue, 1);
+    T.disarmWdog();
+    T.setVid(null);
+    T.setActive(null);
+    T.setPlayerActive(false);
+}
 
 console.log(`\nsmoke tests: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
