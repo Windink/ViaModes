@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>直播落位守卫 · Via 真机</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>直播落位守卫（Via 真机）</h1>
+<p>直播窗口是滑动的，不能按「上次看到哪儿」或「跳过片头」落位。本页用一份无 ENDLIST 的
+   直播清单，确认真机 hls.js 把 <code>details.live</code> 判对、<code>vvIsLive()</code> 跟着成立，
+   且带着极端输入（旧续播 120s + 跳过片头 90s）起播仍不落位；再用点播 mp4 对照，确认守卫没误伤。</p>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var RUN = (/live-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var M3U8 = (/\?(?:.*&)?m3u8=([^&]+)/.exec(location.search) || [])[1] || '';
+    M3U8 = M3U8 ? decodeURIComponent(M3U8) : '';
+
+    var PASS = 0, FAIL = 0, ERRS = [];
+    window.addEventListener('error', function (e) {
+        ERRS.push(String(e && (e.message || (e.error && e.error.message)) || 'unknown'));
+    });
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    // 一进页面就留个脚印：万一后面卡在等 __vv，也能分清「JS 没跑」和「脚本没注入」
+    send({ tag: 'boot', href: location.href.slice(0, 200) });
+    function ok(name, cond, detail) {
+        var p = !!cond;
+        if (p) PASS++; else FAIL++;
+        send({ tag: 'ok', name: name, pass: p, detail: String(detail || '') });
+        return p;
+    }
+    function untilReady() {
+        return new Promise(function (resolve) {
+            var n = 0;
+            (function tick() {
+                if (window.__vv && window.__vv.VV) return resolve(window.__vv);
+                if (++n > 120) return resolve(null);
+                setTimeout(tick, 200);
+            })();
+        });
+    }
+    function txt(sel) {
+        var el = document.querySelector(sel);
+        return el ? (el.textContent || '') : '';
+    }
+
+    async function main() {
+        var vv = await untilReady();
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        send({ tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            ua: navigator.userAgent.slice(0, 140), vw: innerWidth, vh: innerHeight });
+        ok('脚本注入且调试句柄挂载', !!vv);
+        ok('脚本版本与 dist 一致', !!vv && vv.VV.version === expect,
+            vv ? vv.VV.version : 'none');
+        if (!vv) { send({ tag: 'done', pass: PASS, fail: FAIL, err: 'no __vv' }); return; }
+        ok('直播只读现场探针可用', typeof vv.liveProbe === 'function');
+        ok('直播清单地址已传入', !!M3U8, M3U8.slice(-48));
+        if (typeof vv.liveProbe !== 'function' || !M3U8) {
+            send({ tag: 'done', pass: PASS, fail: FAIL, err: 'probe or m3u8 missing' });
+            return;
+        }
+
+        // 清单在设备侧能不能取到：reverse 没建 / 路径被挡都会让 hls 报「地址打不开」
+        var mf = null;
+        try {
+            var r = await fetch(M3U8, { method: 'GET' });
+            mf = { status: r.status, len: (await r.text()).length };
+        } catch (eM) { mf = { err: String(eM) }; }
+        send({ tag: 'diag', phase: 'manifest', mf: mf });
+
+        // ---------- 1. 打开直播 HLS ----------
+        try { vv.close(); } catch (eC) {}
+        try { vv.open({ url: M3U8, name: '真机直播测试流', type: 'HLS', source: 'test' }); }
+        catch (eO) { send({ tag: 'diag', phase: 'openErr', msg: String(eO) }); }
+        hud.textContent = '已打开直播清单，等 MANIFEST_PARSED + metadata…';
+
+        var p = null;
+        for (var i = 0; i < 30; i++) {
+            await wait(500);
+            try { p = vv.liveProbe(); } catch (eP) { p = { err: String(eP) }; }
+            // 等 details.live 有明确值再定案，别在清单还没解析完时下结论
+            if (p && p.levels > 0 && p.levelLive !== null && p.levelLive !== undefined) break;
+        }
+        send({ tag: 'diag', phase: 'live', probe: p });
+        hud.textContent = 'live=' + (p && p.live) + ' levels=' + (p && p.levels) +
+            ' target=' + JSON.stringify(p && p.target);
+
+        ok('hls.js 实例已建且拿到档位', !!(p && p.levels > 0), p && p.levels);
+        ok('清单确实被解析成直播（details.live=true）', !!(p && p.levelLive === true),
+            p && p.levelLive);
+        ok('真机 vvIsLive() 判对（守卫的前提）', !!(p && p.live === true), p && p.live);
+        ok('直播：旧续播 + 跳过片头都不落位', !!(p && p.target && p.target.t === 0),
+            p && JSON.stringify(p.target));
+        ok('直播：理由留空（不弹误导性「已回到上次位置」）',
+            !!(p && p.target && p.target.why === ''), p && p.target && p.target.why);
+        // 静态直播清单不会持续吐新分片，timeupdate 未必推进，所以时长位只留现场不作断言
+        send({ tag: 'diag', phase: 'liveDom', dur: txt('#vv-dur'), body: txt('.vv-player-root').slice(0, 120) });
+        var cur = p && typeof p.cur === 'number' ? p.cur : -1;
+        ok('直播：currentTime 没被跳到旧位置 120s', cur >= 0 && cur < 60, cur);
+
+        // ---------- 2. 点播对照：同一个探针必须恢复落位，守卫不能误伤 ----------
+        try { vv.close(); } catch (eC2) {}
+        try { vv.open({ url: location.origin + '/e2e/flower.mp4', name: '点播对照',
+            type: 'MP4', source: 'test' }); } catch (eO2) {}
+        await wait(2200);
+        var q = null;
+        try { q = vv.liveProbe(); } catch (eP2) { q = { err: String(eP2) }; }
+        send({ tag: 'diag', phase: 'vod', probe: q });
+        ok('点播：vvIsLive() 判成 false', !!(q && q.live === false), q && q.live);
+        ok('点播：同一份输入照旧落位（守卫没误伤）',
+            !!(q && q.target && q.target.t > 0 && q.target.why === 'skip'),
+            q && JSON.stringify(q.target));
+
+        try { vv.close(); } catch (eC3) {}
+        ok('全程没有未捕获 JS 报错', ERRS.length === 0, ERRS.join(' | '));
+        send({ tag: 'done', pass: PASS, fail: FAIL, errs: ERRS });
+    }
+    main().catch(function (e) { send({ tag: 'done', pass: PASS, fail: FAIL, err: String(e && e.message || e) }); });
+})();
+</script>
+<!-- 不在这里加载 dist：依赖 Via 已安装的用户脚本注入，页面自己引一份会重复执行。 -->
+</body>
+</html>

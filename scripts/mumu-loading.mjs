@@ -102,10 +102,25 @@ try {
     sh(['shell', `am start -n mark.via/.Shell -a android.intent.action.VIEW -d '${url}'`]);
     console.log('打开页面: ' + url + '\n');
 
-    let done = false;
+    // 进度必须边跑边打：整套要 1.5~3 分钟，慢网场景单场景就等十几秒，
+    // 只在 done 时一次性打印会让人以为卡死（真被这么误会过）。
+    let done = false, seenScene = 0, waited = 0;
     for (let i = 0; i < 360; i++) {
         await sleep(500);
-        if (readRows().filter((r) => r.run === pageTag).some((r) => r.tag === 'done')) { done = true; break; }
+        waited += 500;
+        const cur = readRows().filter((r) => r.run === pageTag);
+        const scenes = cur.filter((r) => r.tag === 'scene');
+        const nOk = cur.filter((r) => r.tag === 'ok').length;
+        for (; seenScene < scenes.length; seenScene++) {
+            const s = scenes[seenScene];
+            console.log(`  · ${s.id} — ${s.fail ? 'FAIL ' + s.fail : 'ok'}（已上报 ${nOk} 条）`);
+        }
+        if (cur.some((r) => r.tag === 'done')) { done = true; break; }
+        if (waited % 10000 === 0) {
+            console.log(scenes.length
+                ? `  … 已完成 ${scenes.length} 个场景，等后面的（${waited / 1000}s）`
+                : `  … 等页面起剧本（${waited / 1000}s）`);
+        }
     }
     const rows = readRows().filter((r) => r.run === pageTag);
     const env = rows.find((r) => r.tag === 'env') || {};

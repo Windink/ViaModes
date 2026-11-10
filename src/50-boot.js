@@ -18,6 +18,32 @@ function vvMain() {
                 get: vvGet,
                 hlsConfig: vvHlsConfig,
                 hlsSeekMode: vvHlsSetSeekMode,
+                // 直播落位守卫的现场：真机 hls.js 的 details.live 到底判没判对，
+                // 以及带着「旧续播位置 + 跳过片头」时起播还会不会落位。
+                // 只读，不改任何状态；参数故意取极端值，方便一条断言就盖住两种输入。
+                liveProbe: function () {
+                    try {
+                        var v = VID;
+                        var lv = (VV.active && VV.active.hls && VV.active.hls.levels) || [];
+                        var known = false, levelLive = false;
+                        for (var i = 0; i < lv.length; i++) {
+                            var dt = lv[i] && lv[i].details;
+                            if (dt && typeof dt.live === 'boolean') {
+                                known = true;
+                                if (dt.live) levelLive = true;
+                            }
+                        }
+                        var dur = v && isFinite(v.duration) ? v.duration : 0;
+                        return {
+                            live: vvIsLive(),
+                            levelLive: known ? levelLive : null,
+                            levels: lv.length,
+                            dur: v ? String(v.duration) : 'none',
+                            cur: v ? v.currentTime : null,
+                            target: vvStartTarget({ t: 120, d: 600 }, dur, 90)
+                        };
+                    } catch (e) { return { err: String(e) }; }
+                },
                 diag: vvDiagText,
                 bufAhead: vvBufAhead,
                 open: openPlayer,

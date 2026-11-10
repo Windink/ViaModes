@@ -9,6 +9,9 @@
 
 var VV_LEASE_TTL = 9000;    // 登记表里超过 9 秒没续的条目视为已退出
 var VV_LEASE_TICK = 2500;
+// 进后台后延迟交还解码器的宽限。系统弹窗（下载、分享、权限框）会让页面隐藏一两秒就回来，
+// 这段时间不拆播放实例；真切走超过宽限才彻底释放。单测会把这个值调成 0 来验超时分支。
+var VV_BG_RELEASE_MS = 1200;
 
 function vvLeaseId() {
     if (!VV._pageId) {
@@ -140,14 +143,23 @@ function vvReleaseDecoder() {
 function vvResumePlayback() {
     try {
         if (!VV.active || !VV.active._suspended) return;
-        if (vvTabHidden()) return;
+        if (vvTabHidden()) { VV._resumeBlock = 'hidden'; return; }
+        // 留痕：回前台没恢复时，靠 _resumeBlock/_resumeAt 区分「判成后台被挡掉」还是
+        // 「压根没有第二次调用」——这两种情况的修法完全不同，不能只凭终态猜。
+        VV._resumeBlock = '';
+        VV._resumeAt = Date.now();
         VV.active._suspended = false;
         VV.active._suspendReason = '';
         VV.active._suspendAt = 0;
         // 顺手把临时静音还原（有些机型 pause 后元素会被静音，回来必须还原）
         try { vvRestoreAudio(VID); } catch (eRA) {}
-        if (VV.active.hls && !VV.active._mediaReleased) {
-            try { VV.active.hls.startLoad(VID.currentTime || 0); } catch (e1) {}
+        // 判据只能是「管线有没有真被拆过」，不能是「有没有 hls 实例」：
+        // mp4 直链本来就没有 hls，按旧判据每次恢复都会掉进「重建播放实例」，
+        // 哪怕只是被系统弹窗挡了一下、src 和 video 全都还在。
+        if (!VV.active._mediaReleased) {
+            try {
+                if (VV.active.hls) VV.active.hls.startLoad(VID.currentTime || 0);
+            } catch (e1) {}
             try { if (VID) VID.play().catch(function () {}); } catch (e2) {}
             vvHideLoading();
         } else {
@@ -319,6 +331,22 @@ function vvVisibilityTick() {
                 // 把能装回去的装回去（直链基本都能成，MSE 看站点有没有 revoke）。
                 try { vvThawMedia(); } catch (eT) {}
             }
+            // 回到前台后「挂起」标记还挂着，就在这里一轮一轮重试到真的恢复为止。
+            //
+            // 为什么不能只靠 vvLeaveBackground 里那一次：它只发生在 bg:1→0 那一瞬，
+            // 而那一刻 vvResumePlayback 内部还要再判一次 vvTabHidden()，判据里的
+            // rAF 间隔（>2.6s 才算切走）和邻居「我在台前」心跳（12s 有效、2s 缓存）
+            // 都带滞后，刚切回来的一两秒里仍可能被判成后台 → 那一次被挡掉。
+            // 之后没有任何路径会再试：vvLeaseTick 只恢复 _suspendReason==='other' 的，
+            // 于是加载永远停在被切走那一刻的进度，用户看到的是
+            // 「切出去回个消息，回来就再也不动了」。
+            //
+            // 排除 'other'：那是「别的页在播，本页让位」，什么时候恢复由 vvLeaseTick
+            // 仲裁；这里硬恢复会变成两页同时抢解码器。
+            if (VV.playerActive && VV.active && VV.active._suspended &&
+                VV.active._suspendReason !== 'other') {
+                try { vvResumePlayback(); } catch (eR) {}
+            }
             // 前台每轮都补一次声音：只要这页在前台、没有待恢复的记录，
             // 就不该有任何元素停在我们压下去的静音态。
             try { vvRestorePageAudio(); } catch (eAH) {}
@@ -338,7 +366,8 @@ function vvBackgroundSweep() {
         if (VV.cfg.hibernate === false || VV.cfg.multiPlay) return;
         VV._sweepCount = (VV._sweepCount || 0) + 1;
         if (vvMediaPipelineCount() > 0) vvReleaseAllMedia('sweep');
-        if (VV.playerActive && VV.active && !VV.active._mediaReleased) vvReleaseDecoder();
+        if (VV.playerActive && VV.active && !VV.active._mediaReleased &&
+            !vvBgReleasePending()) vvReleaseDecoder();
     } catch (e) {}
 }
 
@@ -608,6 +637,7 @@ function vvLeaseStop() {
     try {
         if (VV._leaseTimer) clearInterval(VV._leaseTimer);
         VV._leaseTimer = 0;
+        if (VV._releaseTimer) { clearTimeout(VV._releaseTimer); VV._releaseTimer = 0; }
         vvPlayersUnregister();
     } catch (e) {}
 }
@@ -640,6 +670,7 @@ function vvForceClose() {
     try {
         if (VV._leaseTimer) clearInterval(VV._leaseTimer);
         VV._leaseTimer = 0;
+        if (VV._releaseTimer) { clearTimeout(VV._releaseTimer); VV._releaseTimer = 0; }
         vvPlayersUnregister();
         try { if (VV.active && VV.active.hls) VV.active.hls.destroy(); } catch (e1) {}
         try { if (VID) { VID.pause(); VID.removeAttribute('src'); VID.load(); } } catch (e2) {}
@@ -984,12 +1015,28 @@ function vvRemoveLostTip() {
 // 收到别的页签的"求让"：把本页所有解码器都交出去，包括站点自己的 MSE 播放器。
 // 页签之间没法直接操作对方的 MediaCodec，但大家跑同一份脚本、共用一份存储，
 // 所以用一条广播来协调——对方要开播，本页立刻停手。
+// 后台宽限内不许拆「我们自己的播放器」。系统弹窗（下载、分享、权限框）会让页面
+// 隐藏一两秒又回来，这期间只挂起不拆，回来 play() 就能续上；拆了就得整条重建。
+// 页面自带的播放器不受宽限影响，一律立刻交还。
+function vvBgReleasePending() {
+    try {
+        return !!(VV._bg && VV._releaseTimer &&
+            Date.now() - (VV._bgAt || 0) < VV_BG_RELEASE_MS);
+    } catch (e) { return false; }
+}
+
 function vvReleaseAllMedia(reason) {
     var n = 0;
     try {
         if (VV.playerActive) {
-            try { vvSuspendPlayback(reason === 'peer' ? 'other' : 'hidden'); } catch (e0) {}
-            try { vvReleaseDecoder(); } catch (e0b) {}
+            // 'bg' 这条路径的释放由 vvEnterBackground 的定时器统一负责；
+            // 巡检在宽限内也不许提前拆。让位 / 手动 / 外部 API 仍按原样立即释放。
+            var keepOurs = reason === 'bg' ||
+                (reason === 'sweep' && vvBgReleasePending());
+            if (!keepOurs) {
+                try { vvSuspendPlayback(reason === 'peer' ? 'other' : 'hidden'); } catch (e0) {}
+                try { vvReleaseDecoder(); } catch (e0b) {}
+            }
         }
     } catch (e1) {}
     try {
@@ -1216,11 +1263,24 @@ function vvEnterBackground() {
             try { vvPauseHiddenMedia(); } catch (eP) {}
             try { vvReleaseAllMedia('bg'); } catch (eRA) {}
         }
-        // 2) 我们的播放器：立刻彻底交还解码器，回到前台再整条重建
+        // 2) 我们的播放器：先挂起（pause + stopLoad），解码器留 1.2 秒宽限再交还。
+        // 系统弹窗（下载 .m3u、权限框、分享面板）会让页面短暂隐藏又立刻回来，
+        // 立即释放的话回前台只能整条重建播放实例——用户点个「导出」就看到
+        // 「正在重建播放实例…」和一次播放中断，实测 pip-share 的 toast 断言就是这样被顶掉的。
+        // 短暂后台不释放，回来只需 resume play；真切走超过 1.2s 仍按原样彻底交还，
+        // 「非当前页不持有解码器」这条核心约束没变。
         if (VV.playerActive) {
             try { vvSuspendPlayback('hidden'); } catch (e1) {}
             try { vvPlayersUnregister(); } catch (e2) {}
-            try { vvReleaseDecoder(); } catch (e3) {}
+            try {
+                if (VV._releaseTimer) clearTimeout(VV._releaseTimer);
+                VV._releaseTimer = setTimeout(function () {
+                    VV._releaseTimer = 0;
+                    try {
+                        if (VV._bg && VV.active && VV.active._suspended) vvReleaseDecoder();
+                    } catch (eR) {}
+                }, VV_BG_RELEASE_MS);
+            } catch (e3) {}
         }
     } catch (e) {}
 }
@@ -1234,6 +1294,8 @@ function vvLeaveBackground() {
         VV._yielded = false;
         VV._claimAt = Date.now();
         try { if (VV._hibTimer) { clearTimeout(VV._hibTimer); VV._hibTimer = 0; } } catch (e0) {}
+        // 宽限期内回来了：解码器压根没交出去，取消这次释放
+        try { if (VV._releaseTimer) { clearTimeout(VV._releaseTimer); VV._releaseTimer = 0; } } catch (eR0) {}
         // 先宣告"我回到前台了"：别的页签读到就立刻让位（同源还有 storage 事件即时触发）。
         // 跨站的靠 GM 通道，两条都不通就只能等对方自己失焦判定。
         try { vvAnnounceFront(); } catch (eF) {}

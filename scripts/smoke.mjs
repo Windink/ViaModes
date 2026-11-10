@@ -4,7 +4,7 @@ import vm from 'node:vm';
 let code = await readFile('dist/via-video-player.user.js', 'utf8');
 const endMark = '})();';
 const last = code.lastIndexOf(endMark);
-const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,startTarget:vvStartTarget,withFrag:vvWithStartFragment,loadEta:vvLoadEta,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;},netFlow:vvNetFlow,armWdog:vvArmStartWatchdog,disarmWdog:vvDisarmStartWatchdog,markSlow:vvMarkLoadingSlow};})();\n';
+const probe = 'window.__vvTest={resolve:vvResolve,scan:vvScanText,scanPerf:vvScanPerf,noteHlsBody:vvNoteHlsBody,hlsConfig:vvHlsConfig,hlsSeekMode:vvHlsSetSeekMode,levelLabel:vvLevelLabel,audioLabel:vvAudioLabel,push:vvPushItem,VV:VV,pageFs:vvPageFsState,pageFsSet:vvPageFsSet,pageFsToggle:vvTogglePageFullscreen,pageFsVideo:vvPageFsVideo,pageFsPick:vvPageFsPick,pageFsDiag:vvPageFsDiag,pageFsDiagnose:vvPageFsDiagnose,pageFsTick:vvPageFsTick,pageFsBtn:vvPageFsSyncBtn,epNum:vvEpNum,epTemplate:vvEpTemplate,epScan:vvEpisodesScan,epDiag:vvEpisodesDiag,epPickGroup:vvEpPickGroup,epCurrent:vvEpCurrent,icons:VV_ICONS,setFs:function(v){document.fullscreenElement=v;},itemRank:vvItemRank,looksAudio:vvLooksLikeAudioHls,videoKey:vvVideoKey,shortName:vvShortName,seekTo:vvSeekTo,setVid:function(v){VID=v;},getVid:function(){return VID;},buildM3U:vvBuildM3U,buildCmd:vvBuildCmd,judgeProbe:vvJudgeProbe,shareName:vvShareName,buildIntent:vvBuildIntent,playersRead:vvPlayersRead,playersWrite:vvPlayersWrite,playersUnregister:vvPlayersUnregister,playersCount:vvPlayersCount,playersOwner:vvPlayersOwner,leaseId:vvLeaseId,setPageId:function(id){VV._pageId=id;},hibernateMedia:vvHibernateMedia,thawMedia:vvThawMedia,installSrcGuard:vvInstallSrcGuard,hardTeardown:vvHardTeardown,cfg:function(){return VV.cfg;},setCfg:function(k,v){VV.cfg[k]=v;},enterBg:vvEnterBackground,leaveBg:vvLeaveBackground,tabHidden:vvTabHidden,tick:vvVisibilityTick,requestPeer:vvRequestPeerRelease,peerSeen:vvPeerReleaseSeen,releaseDecoder:vvReleaseDecoder,deepHib:vvDeepHibernateBlob,rescue:vvCodecRescue,resumeTarget:vvResumeTarget,startTarget:vvStartTarget,withFrag:vvWithStartFragment,loadEta:vvLoadEta,saveNow:vvSaveNow,progMap:vvGetProgressMap,resumePageMedia:vvResumePageMedia,releaseAllMedia:vvReleaseAllMedia,pausePageMedia:vvPausePageMedia,setActive:function(a){VV.active=a;},setPlayerActive:function(v){VV.playerActive=v;},mediaPipelines:vvMediaPipelineCount,sweep:vvBackgroundSweep,gateActive:vvGateActive,detachMedia:vvDetachMedia,attachMedia:vvAttachMedia,restoreAudio:vvRestoreAudio,origMuted:vvOrigMuted,restorePageAudio:vvRestorePageAudio,restorePlayerAudio:vvRestorePlayerAudio,hardRelease:vvHardReleaseVideo,setBg:function(v){VV._bg=v;},setFocusEver:function(v){VV._focusEverTrue=v;},announceFront:vvAnnounceFront,peerFrontSeen:vvPeerFrontSeen,focusLostLong:vvFocusLostLong,announceFrontRaw:function(id,ts){try{localStorage.setItem("vvs:front:"+id,JSON.stringify({ts:ts}));}catch(e){}},clearFront:function(){try{var d=[];for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);if(k&&k.indexOf("vvs:front:")===0)d.push(k);}for(var j=0;j<d.length;j++)localStorage.removeItem(d[j]);}catch(e){}},hasPriorityOverlay:vvHasPriorityOverlay,mini:vvMiniWindow,pip:vvTryPip,setRoot:function(r){ROOT=r;},setMini:function(v){VV._mini=v;},resetTeardown:function(){_vvTornDown=false;_vvReleasedOnce=false;},lowFxSync:vvSyncLowFx,lowFxToggle:vvToggleLowFx,setCurTime:vvSetCurTime,setCurTimeEl:function(e){CSTIME=e;},setBarPct:vvSetBarPct,getDurEl:function(){return DUREL;},apState:function(){try{return {blocked:VV_AP.blocked,hooked:VV_AP.hooked,allow:vvApCfgOn()};}catch(e){return null;}},apTame:vvApTamePreload,apRestore:vvApRestorePreload,apAllowNext:vvApAllowNext,stopPagePreload:vvStopPagePreload,restorePagePreload:vvRestorePagePreload,preHeldLen:function(){return VV_PRELOAD_HELD.length;},setGesture:function(ts){VV_AP.lastGesture=ts;},netFlow:vvNetFlow,armWdog:vvArmStartWatchdog,disarmWdog:vvDisarmStartWatchdog,markSlow:vvMarkLoadingSlow,bgReleaseMs:function(v){VV_BG_RELEASE_MS=v;}};})();\n';
 const test = code.slice(0, last) + probe;
 
 const elStub = () => ({
@@ -706,18 +706,56 @@ T.setCfg('hibernate', true);
     T.setPlayerActive(true);
     T.setActive({ item: { url: 'https://a/b.m3u8', type: 'HLS' }, hls: inst, _suspended: false });
     T.VV._hlsPool = [];
+    // 宽限设成一个测试进程内不会到点的值，再手动跑巡检验两条分支。
+    // 不能真的等 1.2 秒：脚本自身有 900ms 巡检等定时器，真实等待会把后面的用例全搅乱。
+    T.bgReleaseMs(1e9);
     T.enterBg();
-
-    // stopLoad 会被调两次（挂起一次、彻底释放再一次），幂等，不算问题
-    eq('进后台：hls 被 stopLoad', stopped >= 1, true);
-    eq('进后台：hls 被 detachMedia', detached, 1);
-    eq('进后台：hls 被 destroy', destroyed, 1);
-    eq('进后台：播放器 video 的 src 被摘掉', pv.getAttribute('src'), null);
-    eq('进后台：播放器 video 走了 load()', pv.loaded, true);
-    eq('进后台：记下续播位置', Math.round(T.VV.active._suspendT), 30);
-    eq('进后台：标记解码器已释放', T.VV.active._mediaReleased, true);
+    // 进后台先只挂起（pause + stopLoad），解码器留 1.2s 宽限：系统弹窗导致的
+    // 短暂隐藏不该把播放实例整条拆掉（pip-share 的导出 toast 就是这么被顶掉的）。
+    eq('进后台：立刻挂起播放', T.VV.active._suspended, true);
+    eq('进后台：宽限期内解码器仍在本页', !!T.VV.active._mediaReleased, false);
     eq('进后台：状态机置后台', T.VV._bg, true);
-    eq('进后台：后台不重复释放', (T.enterBg(), destroyed), 1);
+    eq('进后台：后台不重复挂起', (T.enterBg(), stopped), 1);
+    eq('宽限内巡检不提前拆播放器', (T.sweep(), !!T.VV.active._mediaReleased), false);
+
+    // 宽限过了、人还没回来：按原样彻底交还（把阈值调 0 模拟到点，不真的等）
+    T.bgReleaseMs(0);
+    T.sweep();
+    T.bgReleaseMs(1200);
+    eq('超过 1.2s：hls 被 stopLoad', stopped >= 1, true);
+    eq('超过 1.2s：hls 被 detachMedia', detached, 1);
+    eq('超过 1.2s：hls 被 destroy', destroyed, 1);
+    eq('超过 1.2s：播放器 video 的 src 被摘掉', pv.getAttribute('src'), null);
+    eq('超过 1.2s：播放器 video 走了 load()', pv.loaded, true);
+    eq('超过 1.2s：记下续播位置', Math.round(T.VV.active._suspendT), 30);
+    eq('超过 1.2s：标记解码器已释放', T.VV.active._mediaReleased, true);
+}
+
+// 直链 mp4 没有 hls 实例，恢复时不能被误判成「管线拆了」而整条重建：
+// 判据只看 _mediaReleased。短后台回来只需 play()，不该弹「正在重建播放实例…」。
+{
+    const pv4 = fakeVideo('https://cdn.a.com/direct.mp4', 25);
+    T.setVid(pv4);
+    T.setBg(true);
+    T.setFocusEver(false);
+    T.VV._rafSeen = false;
+    T.VV._peerFrontAt = 0;
+    T.VV._peerFrontSeen = false;
+    eq('前台判据先复位（否则恢复会被判后台挡掉）', T.tabHidden(), false);
+    T.setPlayerActive(true);
+    T.setActive({ item: { url: 'https://cdn.a.com/direct.mp4', type: 'MP4' },
+        hls: null, _suspended: true, _suspendReason: 'hidden',
+        _suspendAt: Date.now(), _mediaReleased: false });
+    T.leaveBg();
+    eq('直链短后台：走轻量恢复而不是重建', pv4.played, true);
+    eq('直链短后台：挂起标记已清', T.VV.active._suspended, false);
+    eq('直链短后台：没有把管线标成已释放', !!T.VV.active._mediaReleased, false);
+    T.setPlayerActive(false);
+    T.setActive(null);
+    // leaveBg 会刷新 _claimAt / _peerHandled，不复位会挡掉后面「收到别人求让」的用例
+    T.VV._claimAt = 0;
+    T.VV._peerHandled = 0;
+    T.VV._bg = false;
 }
 
 // 后台绝对不能再起播页面视频：一起播就又占一个解码器，而用户根本看不见
@@ -725,14 +763,21 @@ T.setCfg('hibernate', true);
     const sv = fakeVideo('https://cdn.a.com/other.mp4', 8);
     T.VV._pageMedia = [sv];
     T.VV._pageMediaDeferred = [];
+    // 直接把文档桩切成隐藏，别用邻居宣告造后台：那条记录会留 12 秒，
+    // 把后面「收到别人求让」的用例一起带偏
+    documentStub.visibilityState = 'hidden';
+    eq('后台判据先确认成立', T.tabHidden(), true);
     T.resumePageMedia();
     eq('后台不重启页面视频', sv.played, false);
     eq('后台把待恢复的视频存进 deferred', (T.VV._pageMediaDeferred || []).length, 1);
     T.VV._rafLast = Date.now();
+    documentStub.visibilityState = 'visible';
     T.leaveBg();
     eq('回前台后补上恢复', (T.VV._pageMediaDeferred || []).length, 0);
     T.VV.playerActive = false;
     T.VV.active = null;
+    // leaveBg 刚刷新过 _claimAt，不复位会让下一段「收到别人求让」被当成过期消息挡掉
+    T.VV._claimAt = 0;
 }
 
 // 跨页签求让：别的页签要开播，本页看到广播就把解码器交出去
@@ -1413,6 +1458,14 @@ eq('已看完的片子：不落位（片头也不抢）', T.startTarget({ t: 592
 eq('片头超过片长：夹到时长末尾', T.startTarget(null, 20, 30).t, 19.9);
 eq('元数据未到时用记录里的时长判尾巴', T.startTarget({ t: 6.5, d: 10 }, 0, 0).t, 6.5);
 eq('元数据未到时已到尾巴就从头', T.startTarget({ t: 9.8, d: 10 }, 0, 0).t, 0);
+// 直播：窗口会滑动，落位点一旦滑出去就得从窗口最早的分片重拉（落后一大截）甚至起不来。
+// 跳过片头对直播也没意义。判据见 vvIsLive：hls.js 的 details.live 或 duration === Infinity。
+T.setVid({ duration: Infinity });
+eq('直播：有续播记录也不落位', T.startTarget({ t: 120 }, 0, 0).t, 0);
+eq('直播：跳过片头同样不落位', T.startTarget(null, 0, 90).t, 0);
+eq('直播：落位理由留空（不出误导性 toast）', T.startTarget({ t: 120 }, 0, 90).why, '');
+T.setVid({ duration: 600 });
+eq('点播：同一份记录照旧续播（守卫不能误伤）', T.startTarget({ t: 120 }, 600, 0).t, 120);
 
 // ---- 直链起播把起点写进媒体片段（#t=），避免「先播 0s 再 seek」 ----
 eq('没有片段：追加 #t=', T.withFrag('http://x/a.mp4', 6.5), 'http://x/a.mp4#t=6.5');

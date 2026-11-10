@@ -88,6 +88,10 @@
         var vid = r0 ? r0.querySelector('video') : null;
         ok('播放器已打开且 video 有源', !!r0 && !!vid && !!(vid.currentSrc || vid.src),
             vid ? (vid.currentSrc || '').slice(-32) : 'no video');
+        // flower.mp4 只有 21.6s，整套断言要跑更久。不循环的话播到尾会触发 vvOnEnded：
+        // 弹「播放结束」占住唯一的 toast，1.6s 后还 closePlayer()，后面几条
+        // 「点复制/导出给出明确提示」就会读到旧文案，是测试台自己的假 FAIL。
+        try { if (vid) vid.loop = true; } catch (eL) {}
         var pipBtn = document.querySelector('[data-act="pip"]');
         var pr = pipBtn ? pipBtn.getBoundingClientRect() : null;
         ok('顶栏画中画按钮在视口内可点', !!pr && pr.width > 20 && pr.left >= 0 && pr.right <= window.innerWidth,

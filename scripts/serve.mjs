@@ -77,6 +77,7 @@ http.createServer(async (req, res) => {
     if (/^\/e2e\/loading-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/loading-android.html';
     // hls.js 内联执行成本真机量化台同理
     if (/^\/e2e\/hlsperf-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/hlsperf-android.html';
+    if (/^\/e2e\/live-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/live-android.html';
     if (/^\/e2e\/open-ab-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-android.html';
     if (/^\/e2e\/open-ab-hls-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-hls-android.html';
     // HLS 对照页的「网页臂」必须用插件内联的同一份 hls.js（light 构建），

@@ -1958,6 +1958,12 @@ function vvResumeTarget(d, duration) {
 // 合成一个目标位后，起播阶段就能一次落位（直连用 #t=、hls 用 startLoad(t)）。
 // duration 还没拿到时传 0，就用续播记录里存的那份时长（回来改判用）。
 function vvStartTarget(d, duration, skipS) {
+    // 直播不落位。直播窗口是滑动的，按「上次看到哪儿」或「跳过片头」落位，落点很可能已经
+    // 滑出窗口：hls.js 会退到窗口里最早的可用分片重拉（一下子落后十几秒到几分钟），
+    // 原生 HLS 干脆起不来。「跳过片头」对直播也没有意义——直播没有片头。
+    // 判不出直播时（元数据还没到、master 清单的 details 还没下）照旧走下面的逻辑，
+    // 那条路要靠 loadedmetadata 再纠正一次。
+    if (vvIsLive()) return { t: 0, why: '' };
     var dur = (duration && isFinite(duration)) ? duration : ((d && d.d && isFinite(d.d)) ? d.d : 0);
     var maxT = dur ? Math.max(0, dur - 0.1) : 0;
     var t = vvResumeTarget(d, dur);

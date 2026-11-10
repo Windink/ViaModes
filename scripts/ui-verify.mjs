@@ -802,8 +802,7 @@ try {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
         document.dispatchEvent(new Event('visibilitychange'));
     });
-    await sleep(700);
-    const bgState = await page.evaluate(() => {
+    const readBg = () => page.evaluate(() => {
         const v = document.querySelector('.vv-player-video');
         return {
             srcLen: window.__vv.videoSrcLen(),
@@ -815,10 +814,21 @@ try {
             released: !!(window.__vv.VV.active && window.__vv.VV.active._mediaReleased)
         };
     });
-    ok('切后台：判定为后台', bgState.hidden === true, JSON.stringify(bgState));
-    ok('切后台：播放器 video 的 src 被摘掉（解码器让出）', bgState.srcLen === 0, 'srcLen=' + bgState.srcLen);
-    ok('切后台：hls 实例池清空', bgState.pool === 0, 'pool=' + bgState.pool);
-    ok('切后台：播放管线标记为已释放', bgState.suspended && bgState.released, JSON.stringify(bgState));
+    // 进后台先只挂起，解码器留 1.2 秒宽限：系统弹窗（下载、分享、权限框）会让页面
+    // 隐藏一两秒又回来，这段时间拆掉播放实例就得整条重建，用户会看到一次播放中断。
+    await sleep(700);
+    const soonState = await readBg();
+    ok('切后台：判定为后台', soonState.hidden === true, JSON.stringify(soonState));
+    ok('切后台宽限内：只挂起、不拆播放实例',
+        soonState.suspended && !soonState.released && soonState.srcLen > 0,
+        JSON.stringify(soonState));
+
+    // 宽限过了、人还没回来：按原样彻底交还。tick 是 900ms 一轮，留足余量
+    await sleep(1800);
+    const bgState = await readBg();
+    ok('切后台超过宽限：播放器 video 的 src 被摘掉（解码器让出）', bgState.srcLen === 0, 'srcLen=' + bgState.srcLen);
+    ok('切后台超过宽限：hls 实例池清空', bgState.pool === 0, 'pool=' + bgState.pool);
+    ok('切后台超过宽限：播放管线标记为已释放', bgState.suspended && bgState.released, JSON.stringify(bgState));
 
     // 回到前台：应该整条重建并接着播
     await page.evaluate(() => {

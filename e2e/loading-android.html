@@ -160,12 +160,32 @@
             if (a._liveMs && dbg.sampled.length < 6) dbg.sampled.push([a._liveMs, a._liveLoaded, a._liveTotal]);
         }, 100);
         var seenEta = '', seenDetail = '', firstFrameAt = -1, dts = [], atFrame = '';
-        while (performance.now() - t0 < 45000) {
+        // 每 2s 一条状态快照：切后台/切回来的过程里，播放器是被拆了、还是拆完没重建，
+        // 只看结束时的终态分不出来，必须留过程。
+        var snaps = [], lastSnap = -2000;
+        // 观察窗口可用 ?wait= 覆盖：验证"切走后能否恢复"时需要比默认 45s 更长的窗口
+        var WIN = Number((/\?(?:.*&)?wait=(\d+)/.exec(location.search) || [])[1] || 45000);
+        while (performance.now() - t0 < WIN) {
             var dt = detailText();
             if (!seenEta && /约\s*\d+\s*(?:s|分钟)/.test(dt)) seenEta = dt;
             if (dt && dts.indexOf(dt) < 0 && dts.length < 14) dts.push(dt);
             if (!seenDetail && dt) seenDetail = dt;
             var pi = playerInfo();
+            var nw = Math.round(performance.now() - t0);
+            if (nw - lastSnap >= 2000) {
+                lastSnap = nw;
+                var V2 = (window.__vv && window.__vv.VV) || {}, a2 = V2.active || {};
+                snaps.push({ at: nw, bg: V2._bg ? 1 : 0, sus: a2._suspended ? 1 : 0,
+                    rel: a2._mediaReleased ? 1 : 0, ctx: (a2.hls || a2._inst) ? 1 : 0,
+                    rs: pi.v ? pi.v.readyState : -1, pa: pi.v ? (pi.v.paused ? 1 : 0) : -1,
+                    pl: V2.playerActive ? 1 : 0,
+                    // 判据本身也要留痕：dh=document.hidden，raf=rAF 间隔（>2600 才算切走），
+                    // rb=上次恢复被挡的原因。少了这三个，只能看到"没恢复"，看不出为什么。
+                    dh: document.hidden ? 1 : 0,
+                    raf: V2._rafLast ? (Date.now() - V2._rafLast) : -1,
+                    rb: V2._resumeBlock || '',
+                    dt: dt });
+            }
             // 首帧那一刻明细上写着什么，才是用户真正看到的最后一个数
             if (pi.playing && firstFrameAt < 0) {
                 firstFrameAt = Math.round(performance.now() - t0);
@@ -185,7 +205,16 @@
             seenDetail: seenDetail, dts: dts,
             liveMs: act._liveMs, liveLoaded: act._liveLoaded, liveTotal: act._liveTotal,
             nProg: dbg.nProg, hooked: dbg.hooked, firstProg: dbg.first,
-            liveSamples: dbg.sampled, hookErr: dbg.err, atFrame: atFrame });
+            liveSamples: dbg.sampled, hookErr: dbg.err, atFrame: atFrame,
+            // 前后台判定是否真的触发：这决定"切走时加载断不断"是不是设计保证。
+            // _bg=被判为后台、suspAt=挂起时刻、susp=挂起原因；全为 0/false 说明
+            // 脚本根本没认出切走（Via 这类壳不派发 visibilitychange 时就会这样）。
+            bg: (window.__vv && window.__vv.VV ? !!window.__vv.VV._bg : null),
+            suspAt: act._suspendAt || 0, susp: act._suspendReason || '',
+            streaks: (window.__vv && window.__vv.VV ? window.__vv.VV._hidStreak : null),
+            resumeAt: (window.__vv && window.__vv.VV ? window.__vv.VV._resumeAt : 0) || 0,
+            resumeBlock: (window.__vv && window.__vv.VV ? window.__vv.VV._resumeBlock : '') || '',
+            snaps: snaps });
         closeAll();
         await wait(1200);
     }
