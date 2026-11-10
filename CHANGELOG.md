@@ -17,6 +17,24 @@
 
 ## 未发布
 
+### 新增
+
+- `mumu-slow.mjs` + `e2e/slow-android.html`：把这五项慢资源判据搬到真机（MuMu + Via）跑。
+  桌面量的是页面脚本与 hls.js 的逻辑，量不到 Via 的 WebView 里首字节更晚、分片解码更慢、
+  `networkState` 抖动这些差异，而看门狗正是靠证据档位决定「续命还是判死」，边界得真机确认。
+  页面自己按场景 drive `__vv.open`、采样式断言后上报；驱动负责起静态 serve + 限速 slow-serve、
+  映射两个端口（页面与限速资源不同源）、换别名路径避开 Via 按 URL 命中的缓存
+- `slow-serve.mjs` 加 CORS（含 `OPTIONS` 与 `Expose-Headers`）：限速资源与测试台不同源，
+  hls.js 用 XHR 取清单/分片，没有这几个头会把「慢」当「源坏了」，测出来是错的东西
+- `serve.mjs` 加 `/e2e/slow-android-<别名>.html` 映射，理由同上（Via 缓存按路径命中）
+
+### 测试
+
+- 真机（MuMu / Via 7.3.3 / WebView 110，v0.1.77）：`node scripts/mumu-slow.mjs` 19 项全过。
+  steady 续命 3 次、证据档 2；stall 卡 18s 不弹卡片、不重建、恢复后出画；dead 47.2s 才给
+  「这个视频源播不了」（弱证据上限 45s，没有无限等）；hls-manifest / hls-frag 各续命 1 次后出画
+- 桌面 `slow-media-verify.mjs` 的 HLS 两条在加 CORS 后复跑仍全过（原先是靠同源巧合）
+
 ## v0.1.77 — 2026-11-10
 
 ### 新增

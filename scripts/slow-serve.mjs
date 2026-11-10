@@ -44,8 +44,22 @@ function mimeOf(file) {
 const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     if (u.pathname === '/health') { res.end('ok'); return; }
+    // 页面测试台跑在另一个端口（serve.mjs），限速资源在本地就是跨源：
+    // hls.js 用 XHR 取清单和分片，没有这几个头会直接判网络失败，
+    // 于是「慢」被误当成「源坏了」，测出来的是错的东西。
+    const cors = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'Access-Control-Allow-Headers': '*',
+        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges'
+    };
+    if (req.method === 'OPTIONS') {
+        res.writeHead(204, cors);
+        res.end();
+        return;
+    }
     const hit = pickFile(u.pathname);
-    if (!hit) { res.writeHead(404); res.end('no file'); return; }
+    if (!hit) { res.writeHead(404, cors); res.end('no file'); return; }
 
     const kbps = Math.max(1, Number(u.searchParams.get('kbps') || 8));
     const stallAfter = Number(u.searchParams.get('stallAfter') || 0);
@@ -64,7 +78,8 @@ const server = http.createServer((req, res) => {
         'Content-Length': String(len),
         'Accept-Ranges': 'bytes',
         // 别让浏览器缓存替我们省掉流量：这个服务就是在量"没缓存时慢慢下"的行为
-        'Cache-Control': 'no-store'
+        'Cache-Control': 'no-store',
+        ...cors
     };
     if (code === 206) head['Content-Range'] = `bytes ${start}-${end}/${total}`;
     res.writeHead(code, head);

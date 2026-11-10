@@ -743,6 +743,19 @@ HLS 的两条用 `e2e/media/hls/*.ts` 当分片（各 10s，来自 mux 的公开
 「证据建立了但续命没生效」。判据本身（证据三档、45s/100s/120s 三档预算）在
 `scripts/smoke.mjs` 里有 17 项 Node 侧断言，不依赖浏览器，改判据时先跑 smoke。
 
+#### 真机对照（`node scripts/mumu-slow.mjs`）
+
+桌面 Chromium 量的是页面脚本 + hls.js 的逻辑，量不到 Via 的 WebView 里首字节更晚、
+分片解码更慢、`networkState` 抖动这些差异——而看门狗正是靠证据档位决定「续命还是判死」，
+所以同一套五场景要在真机再跑一遍。`e2e/slow-android.html` 页内自己 drive `__vv.open`、
+每 300ms 采样并断言，`scripts/mumu-slow.mjs` 负责起静态 serve + 限速 slow-serve、把
+两个端口都 `adb reverse` 进去、换别名路径避开 Via 按 URL 命中的缓存。
+
+限速资源与测试台不同源，`slow-serve.mjs` 必须带 CORS（hls.js 用 XHR 取清单/分片，
+没有 `Access-Control-Allow-Origin` 会把「慢」判成「源坏了」）。实测（MuMu / Via 7.3.3 /
+WebView 110，v0.1.77）19 项全过：`dead` 47.2s 才给结论，其余四个不弹卡片并最终出画。
+`SCENARIOS=steady,dead` 可只跑单项，`LIMIT=<秒>` 改总超时。
+
 ## 已知限制（同油猴生态的共性）
 
 | 限制 | 说明 |
@@ -791,6 +804,7 @@ scripts/mumu-pip-share.mjs  小窗 / 导出浮层真机验证驱动（MuMu + Via
 scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图→选集验证→慢资源起播回归）
 scripts/slow-serve.mjs  限速静态服务（`kbps=` 限速 / `stallAfter`+`stallMs` 模拟 CDN 卡住，带背压；复现弱网现场用）
 scripts/slow-media-verify.mjs  慢资源起播回归（slow/stall/dead 三场景：慢不误判、卡顿不重建、假活仍会给结论）
+scripts/mumu-slow.mjs  慢资源起播 · 真机对照（MuMu + Via，五场景页内自驱动；含两端口映射与限速服务）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/perf-playback.mjs  桌面播放态帧间隔基准（解除 headless 60Hz 节流 + 动态底层像素，对比无菜单 / 默认低特效 / 强制毛玻璃）
 scripts/mumu-perf-play.mjs  播放态模糊层真机帧率探针（MuMu + Via，60Hz 下 >25ms 判跳帧，三场景各 4s × 2 轮）
@@ -803,6 +817,7 @@ e2e/episodes.html  选集测试台：24 集同模板链接 + 外域推荐位 / �
 e2e/episodes-android.html  选集真机自驱动测试台：同一套素材，页内跑 35 项断言并 POST 上报（链接 query 跟随当前页，只改 hash）
 e2e/pip-share-android.html  小窗 / 导出浮层真机自驱动测试台：页内跑 40 项断言并 POST 上报（含 TouchEvent 拖动模拟与跨巡检窗口）
 e2e/perf-play-android.html  播放态模糊层真机探针：页内 rAF 采样，无菜单 / 默认低特效 / 强制毛玻璃三场景各 4s × 2 轮上报帧间隔
+e2e/slow-android.html  慢资源起播真机测试台：五个限速场景逐个 drive `__vv.open`，每 300ms 采样判据/续命/错误卡并上报，失败带时间线
 e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产物写在 e2e/local/，不入库）
 ```
 

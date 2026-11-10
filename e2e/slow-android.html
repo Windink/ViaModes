@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>慢资源起播 · Via 真机验证</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  video { width: 180px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>慢资源起播（Via 真机）</h1>
+<p>五个场景逐个用真实限速资源打开播放器：慢但在下 / 中途卡住 / 假活源 / HLS 清单慢 / HLS 首片慢。
+   判据是「只是慢不算播不了」，唯一反向保险是假活源必须在弱证据上限后给结论。页面自动采样并上报。</p>
+<video preload="metadata" src="/e2e/flower.mp4"></video>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    // Via 重启会恢复旧标签，旧页面也在上报；驱动只认本轮标识
+    var RUN = (/slow-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    // 限速服务端口由驱动每轮随机分配（避免端口冲突），用 query 传进来
+    var SLOW = (/\?(?:.*&)?slow=(\d+)/.exec(location.search) || [])[1] || '';
+    var SLOWBASE = SLOW ? 'http://127.0.0.1:' + SLOW : '';
+    // 只跑指定场景（调试单项时省掉三分钟）：?only=steady,dead
+    var ONLY = ((/\?(?:.*&)?only=([^&]+)/.exec(location.search) || [])[1] || '')
+        .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function hudText(s) { hud.textContent = s; }
+
+    // 真机比桌面慢一档，判定窗口给一点余量（尤其假活源的 45s 弱证据上限）
+    var SCEN = [
+        {
+            id: 'steady', label: '慢但在下（8KB/s）', type: 'MP4',
+            file: '/e2e/flower.mp4', q: 'kbps=8', dur: 28000,
+            check: function (c) {
+                return [
+                    [c.err === 0, '全程不出现错误卡片'],
+                    [c.rescue === 0, '不触发解码器自救（慢 ≠ 解码器被占满）'],
+                    [c.ext >= 1, '12s 时按证据续命，而不是判死'],
+                    [c.slowText, '加载环改文案为「网络较慢，仍在加载」']
+                ];
+            }
+        },
+        {
+            id: 'stall', label: '传到一半卡住（200KB/s，60KB 处停 18s）', type: 'MP4',
+            file: '/e2e/media/bb720.mp4', q: 'kbps=200&stallAfter=60000&stallMs=18000', dur: 38000,
+            check: function (c) {
+                return [
+                    [c.err === 0, '卡顿期间不出现错误卡片'],
+                    [c.rescue === 0, '不销毁重建播放实例'],
+                    [c.ext >= 1, '卡顿期间按证据续命'],
+                    [c.played, '数据恢复后正常出画播放']
+                ];
+            }
+        },
+        {
+            id: 'dead', label: '假活源（发 1 字节后停住）', type: 'MP4',
+            file: '/e2e/media/bb720.mp4', q: 'kbps=200&stallAfter=1&stallMs=600000', dur: 58000,
+            check: function (c) {
+                return [
+                    [c.errAt < 0 || c.errAt >= 33000, '35s 前不误报（弱证据还在宽限期内）'],
+                    [c.err > 0, '最终给出「播不了」的结论（没有无限等）'],
+                    [c.errAt < 0 || c.errAt <= 58000, '结论落在弱证据上限 45s 附近（≤58s）']
+                ];
+            }
+        },
+        {
+            id: 'hls-manifest', label: 'HLS 清单慢（清单停 13s，分片很快）', type: 'HLS',
+            file: '/.tmp/hls-gen/mumu-manifest.m3u8', q: 'kbps=1&stallAfter=1&stallMs=13000', dur: 30000,
+            check: function (c) {
+                return [
+                    [c.err === 0, '清单慢不许弹「这个视频源播不了」'],
+                    [c.rescue === 0, '不销毁重建播放实例'],
+                    [c.ext >= 1, '12s 时按「清单在飞」续命，而不是判死'],
+                    [c.played, '清单下完后正常出画']
+                ];
+            }
+        },
+        {
+            id: 'hls-frag', label: 'HLS 首片慢（清单快，首片 16KB/s）', type: 'HLS',
+            file: '/.tmp/hls-gen/mumu-frag.m3u8', q: 'kbps=3000', dur: 36000,
+            check: function (c) {
+                return [
+                    [c.err === 0, '首片慢不许弹「这个视频源播不了」'],
+                    [c.rescue === 0, '不销毁重建播放实例'],
+                    [c.ext >= 1, '12s 时按「分片在飞」续命'],
+                    [c.played, '首片下完后正常出画']
+                ];
+            }
+        }
+    ];
+
+    function grab() {
+        var root = document.querySelector('.vv-player-root');
+        var v = root && root.querySelector('video');
+        var eb = root && root.querySelector('.vv-err');
+        var ld = root && root.querySelector('.vv-loading');
+        var d = {};
+        try { d = window.__vv.startDiag() || {}; } catch (e) {}
+        return {
+            rx: v ? v.readyState : -1,
+            ns: v ? v.networkState : -1,
+            paused: v ? !!v.paused : null,
+            err: eb && eb.className.indexOf('on') >= 0 ? 1 : 0,
+            errText: eb ? ((eb.querySelector('.vv-err-t') || {}).textContent || '') : '',
+            ltx: ld ? ((ld.querySelector('.vv-load-text') || {}).textContent || '') : '',
+            ldet: ld ? ((ld.querySelector('.vv-load-detail') || {}).textContent || '') : '',
+            lon: ld ? (ld.className.indexOf('on') >= 0 ? 1 : 0) : -1,
+            // 续命 / 自救 / 证据档位：判定过程本身也要能看见，否则只能靠猜
+            ext: d.ext, rescue: d.rescue, flow: d.flow, manif: d.manif ? 1 : 0,
+            loading: d.loading ? 1 : 0, netAgo: d.netAgo, httpCode: d.httpCode, netFail: d.netFail
+        };
+    }
+
+    async function untilReady() {
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.open) return window.__vv;
+            await wait(200);
+        }
+        return null;
+    }
+
+    async function runOne(vv, sc) {
+        hudText('▶ ' + sc.id + ' · ' + sc.label);
+        send({ tag: 'scene-start', id: sc.id, label: sc.label });
+        var url = SLOWBASE + sc.file + '?' + sc.q;
+        var t0 = performance.now();
+        try {
+            vv.open({ url: url, type: sc.type, name: '慢资源 · ' + sc.id, source: 'test' });
+        } catch (e) {
+            send({ tag: 'err', id: sc.id, msg: String(e && (e.message || e)) });
+        }
+
+        var samples = [], hooked = null, played = false;
+        while (performance.now() - t0 < sc.dur) {
+            var root = document.querySelector('.vv-player-root');
+            var v = root && root.querySelector('video');
+            if (v && v !== hooked) {
+                hooked = v;
+                v.addEventListener('playing', function () { played = true; });
+            }
+            if (v && !v.paused && v.readyState >= 2) played = true;
+            var s = grab();
+            s.el = Math.round(performance.now() - t0);
+            samples.push(s);
+            await wait(300);
+        }
+
+        var errs = samples.filter(function (s) { return s.err === 1; });
+        var firstErr = errs[0];
+        var ctx = {
+            err: errs.length,
+            errAt: firstErr ? firstErr.el : -1,
+            errText: firstErr ? firstErr.errText : '',
+            rescue: Math.max.apply(null, [0].concat(samples.map(function (s) { return s.rescue || 0; }))),
+            ext: Math.max.apply(null, [0].concat(samples.map(function (s) { return s.ext || 0; }))),
+            maxFlow: Math.max.apply(null, [0].concat(samples.map(function (s) { return s.flow || 0; }))),
+            played: played,
+            slowText: samples.some(function (s) { return s.el > 12000 && s.ltx.indexOf('网络较慢') >= 0 && s.lon === 1; })
+        };
+
+        var lines = sc.check(ctx), pass = 0, fail = 0;
+        for (var i = 0; i < lines.length; i++) {
+            var okk = !!lines[i][0];
+            if (okk) pass++; else fail++;
+            send({ tag: 'ok', id: sc.id, name: lines[i][1], pass: okk });
+        }
+        var last = samples[samples.length - 1] || {};
+        send({
+            tag: 'scene', id: sc.id, label: sc.label, pass: pass, fail: fail,
+            err: ctx.err, errAt: ctx.errAt, errText: String(ctx.errText || '').slice(0, 60),
+            ext: ctx.ext, rescue: ctx.rescue, flow: ctx.maxFlow, played: ctx.played,
+            lastRx: last.rx, lastNs: last.ns, lastLtx: String(last.ltx || '').slice(0, 40),
+            // 状态变化时间线（只留变化点），判失败时靠它定位是证据没建立还是续命没生效
+            tl: (function () {
+                var out = [], prev = '';
+                for (var j = 0; j < samples.length; j++) {
+                    var x = samples[j];
+                    var key = [x.rx, x.ns, x.manif, x.loading, x.flow, x.ext, x.err].join('|');
+                    if (key === prev) continue;
+                    prev = key;
+                    out.push([Math.round(x.el / 1000), x.rx, x.ns, x.manif, x.loading, x.flow, x.ext, x.err,
+                        x.netAgo == null ? -1 : Math.round(x.netAgo / 1000)]);
+                }
+                return out;
+            })()
+        });
+        hudText(sc.id + ' · ' + pass + ' pass / ' + fail + ' fail');
+        try { vv.close(); } catch (e) {}
+        await wait(1500);
+    }
+
+    async function main() {
+        var vv = await untilReady();
+        var expect = (/\?(?:.*&)?expect=([\d.]+)/.exec(location.search) || [])[1] || '';
+        send({
+            tag: 'env', version: vv && vv.VV ? vv.VV.version : 'none', expect: expect,
+            slow: SLOW, ua: navigator.userAgent.slice(0, 120),
+            vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio
+        });
+        if (!vv) { send({ tag: 'done', pass: 0, fail: 1, err: 'no __vv' }); return; }
+        if (!SLOWBASE) { send({ tag: 'done', pass: 0, fail: 1, err: 'no slow port' }); return; }
+
+        var totalPass = 0, totalFail = 0;
+        var list = ONLY.length
+            ? SCEN.filter(function (s) { return ONLY.indexOf(s.id) >= 0; })
+            : SCEN;
+        for (var i = 0; i < list.length; i++) {
+            await runOne(vv, list[i]);
+        }
+        // 汇总用汇总行自己算：驱动只读 ok 行与 scene 行也能得到同样的数
+        send({ tag: 'done', scenes: list.length });
+    }
+    main().catch(function (e) {
+        send({ tag: 'fatal', msg: String(e && (e.stack || e.message || e)) });
+        send({ tag: 'done', pass: 0, fail: 1, aborted: true });
+    });
+})();
+</script>
+<!-- 不在这里加载 dist：真机测试台依赖 Via 已安装的用户脚本注入，
+     页面自己再引一份会重复执行，而且页面脚本上下文没有 GM API。 -->
+</body>
+</html>
