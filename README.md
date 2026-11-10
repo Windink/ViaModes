@@ -700,12 +700,38 @@ Android 15 / x86_64 / 系统 WebView 110、Via 7.3.3。
 
 - 标题「这个视频源播不了」+ 具体原因（`HTTP 403 拒绝第三方播放` / `这是页面自己 MSE 会话的句柄（blob）` / `起播超时`）
 - 三个出口按钮：**重试** / **外部播放器** / **返回**
-- 触发条件：HLS 拿到 401/403 立即弹（不再无意义重试）；直链 `MEDIA_ERR_SRC_NOT_SUPPORTED` 或 `blob:` 立即弹；其余情况 12s 看门狗兜底
+- 触发条件：HLS 拿到 401/403 立即弹（不再无意义重试）；直链 `MEDIA_ERR_SRC_NOT_SUPPORTED` 或 `blob:` 立即弹；其余情况走 12s 起播看门狗。但**「慢」不等于「播不了」**，卡片的触发按证据分档：
+  - **强证据**：最近 6 秒有字节到账（分片/清单下完、mp4 `progress` 增长、`loadedmetadata`）→ 可以一直等，总上限 120s
+  - **弱证据**：请求还在飞（分片 <45s、清单 <30s、`networkState===2` 且元素没报错）→ 确认过链路的等到 100s；一个字节都没来过的 45s 判死（防「假活源」）
+  - 源站明说不行（`HTTP>=400`、连续连不上）→ 立刻判死，有字节也不等
+  - 续命期间**保留加载进度环**、文案改「网络较慢，仍在加载…」，不再用错误卡片顶掉进度（旧行为是 `vvShowErr` 顺手 `vvHideLoading()`，用户连"还在下"都看不到）
 
 
 > 抗遮挡测试方法：向 `<html>` 末尾注入 `position:fixed; z-index:2147483647` 的全屏假广告，插件界面会在一轮检测内重新置顶。
 >
 > 实测环境到 Apple test streams 的 hls.js XHR 受 CORS/代理限制（原生 `<video>` 能播，但 hls.js 拉不到清单），属环境问题；HLS 播放/seek 用 CORS 可用的 unified-streaming 与 bitdash 验证。Via 真机上以实际站点为准。
+
+### 慢资源起播回归（`node scripts/slow-media-verify.mjs`）
+
+弱网/源站抖动这类现场在单测里造不出来：需要真的让服务「慢慢发」和「发一半停住」。
+`scripts/slow-serve.mjs` 是个带背压的限速静态服务（`kbps=` 限速、`stallAfter` + `stallMs`
+模拟 CDN 卡住、`VERBOSE=1` 每秒打实际吞吐），`scripts/slow-media-verify.mjs` 起它 +
+`serve.mjs`，在真实 Chrome 里打开内置播放器并逐 250ms 采样判据、续命、自救与 DOM 文案。
+
+三个场景（`SCENARIOS=steady,stall,dead` 可选跑）：
+
+| 场景 | 供给方式 | 改前 | 现在 |
+| --- | --- | --- | --- |
+| `steady` 慢但在下 | 1.1MB mp4 @8KB/s | 14.6s 弹「这个视频源播不了」，22.1s 又自己播起来 | 不报错，续命 3 次、加载环改文案，26s 内出画 |
+| `stall` 传到一半卡住 | 200KB/s，60KB 处停 18s | 16.7s 弹卡片 | 不报错、不重建，数据恢复后正常播放 |
+| `dead` 假活源 | 只发 1 字节后停住 | 12s 弹卡片 | 47.2s 给结论（弱证据 45s 上限），不会无限等 |
+
+`dead` 是反向保险：续命不能变成「永远等下去」。三个场景都断言 `rescue === 0`——慢网不许
+被当成「解码器被占满」而销毁重建（自救只在"数据确实不流了"时才走）。
+
+执行：`node scripts/slow-media-verify.mjs`（约 2 分钟，`SCENARIOS=stall` 可只跑一段）。
+判据本身（证据三档、45s/100s/120s 三档预算）在 `scripts/smoke.mjs` 里有 16 项 Node 侧断言，
+不依赖浏览器，改判据时先跑 smoke。
 
 ## 已知限制（同油猴生态的共性）
 
@@ -752,7 +778,9 @@ scripts/pagefs-probe.mjs   网页铺满多布局探针（干净页 / transform /
 scripts/episodes-verify.mjs  选集真实浏览器验证（真实 DOM 剧集识别 / 干扰排除 / 网格渲染 / 当前集高亮 / 360px 窄屏 / 跳页续播标记 / 直链换源，29 项）
 scripts/mumu-episodes.mjs  选集真机验证驱动（MuMu + Via：adb 连接 / 端口映射 / 拉起页面 / 抓图 / 汇总页内上报，35 项）
 scripts/mumu-pip-share.mjs  小窗 / 导出浮层真机验证驱动（MuMu + Via：页内小窗降级、拖动与还原、跨 2.5 秒置顶巡检浮层仍可点，40 项）
-scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图→选集验证）
+scripts/test-all.mjs  一键跑全套（构建→smoke→e2e→UI 矩阵→网页铺满→多布局探针→bench→截图→加载进度截图→选集验证→慢资源起播回归）
+scripts/slow-serve.mjs  限速静态服务（`kbps=` 限速 / `stallAfter`+`stallMs` 模拟 CDN 卡住，带背压；复现弱网现场用）
+scripts/slow-media-verify.mjs  慢资源起播回归（slow/stall/dead 三场景：慢不误判、卡顿不重建、假活仍会给结论）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/perf-playback.mjs  桌面播放态帧间隔基准（解除 headless 60Hz 节流 + 动态底层像素，对比无菜单 / 默认低特效 / 强制毛玻璃）
 scripts/mumu-perf-play.mjs  播放态模糊层真机帧率探针（MuMu + Via，60Hz 下 >25ms 判跳帧，三场景各 4s × 2 轮）
@@ -781,7 +809,9 @@ node scripts/mumu-episodes.mjs # 选集真机验证（需先启动 MuMu 并在 V
 node scripts/mumu-pip-share.mjs # 小窗 / 导出浮层真机验证（同上，40 项）
 node scripts/mumu-perf-play.mjs # 播放态模糊层真机帧率探针（同上，三场景 × 2 轮）
 node scripts/perf-playback.mjs  # 桌面播放态帧间隔基准（headless，定量以真机为准）
-node scripts/test-all.mjs     # 一键跑全套（10 阶段）
+node scripts/slow-media-verify.mjs  # 慢资源起播回归（限速/卡顿/假活源三场景，约 2 分钟）
+node scripts/slow-serve.mjs   # 单独起限速服务，配合 serve.mjs 手工复现弱网现场
+node scripts/test-all.mjs     # 一键跑全套（11 阶段）
 node scripts/real-site-test.mjs  # 真实站点实测（需外网）
 node scripts/serve.mjs    # 另开终端，然后浏览器打开 http://localhost:8099/e2e/
 ```

@@ -1,6 +1,6 @@
 // 全套测试编排：一条命令跑完所有层级
 //   node scripts/test-all.mjs
-// 层级：构建 → 单元 smoke → 浏览器 e2e → UI 功能矩阵 → 页面全屏验证 → 页面全屏多布局探针 → 性能基准 → 浮层截图 → 加载进度截图 → 选集验证
+// 层级：构建 → 单元 smoke → 浏览器 e2e → UI 功能矩阵 → 页面全屏验证 → 页面全屏多布局探针 → 性能基准 → 浮层截图 → 加载进度截图 → 选集验证 → 慢资源起播回归
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -23,7 +23,7 @@ const run = (label, cmd, args, env) => new Promise((resolve) => {
 
 // 端口分配：避开常用端口，防止冲突
 const base = 8070 + (Number(process.env.PORT_OFFSET) || 0);
-const ports = { e2e: base, ui: base + 1, bench: base + 2, share: base + 3, load: base + 4, pagefs: base + 5, pagefsProbe: base + 6, episodes: base + 7 };
+const ports = { e2e: base, ui: base + 1, bench: base + 2, share: base + 3, load: base + 4, pagefs: base + 5, pagefsProbe: base + 6, episodes: base + 7, slow: base + 8 };
 
 const results = [];
 
@@ -46,6 +46,9 @@ results.push(await run('⑧ 外部播放器浮层截图', 'scripts/share-shot.mj
 results.push(await run('⑨ 加载进度界面截图', 'scripts/load-shot.mjs', [], { PORT: String(ports.load) }));
 
 results.push(await run('⑩ 选集（真实 DOM 识别 / 网格 / 切集）', 'scripts/episodes-verify.mjs', [], { PORT: String(ports.episodes) }));
+
+// 慢资源判据是"时间相关"的：跑 3 个场景约 2 分钟。想缩短可用 SCENARIOS=stall 只跑判死边界。
+results.push(await run('⑪ 慢资源起播（限速 / 卡顿 / 假活源）', 'scripts/slow-media-verify.mjs', [], { PORT: String(ports.slow) }));
 
 console.log('\n\n################ 总览 ################');
 let failed = 0;
