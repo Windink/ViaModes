@@ -840,6 +840,38 @@ metadata / seeking / seeked / playing 的时间点，重复 N 轮取中位数。
 - 三条有效性断言：读到的 vendor 字节必须等于仓库文件、`Hls.version` 必须是 1.7.3、
   执行耗时必须 > 0。任何一条不成立就说明「量的不是产品里那份」。
 
+### 真实站点：装了脚本会不会变慢（`node scripts/mumu-real-ab.mjs`）
+
+只在自己的测试台上量没有说服力，得在真实站点上做「有脚本 / 无脚本」对照。做法是额外装一条
+极小的探针脚本（`e2e/ab-probe.user.js`），**两臂都装、都用它取数**，唯一的变量是主脚本的
+`enabled` 置 0 还是 1——探针开销两边一样，正好抵消。交替跑（无→有→无→有…）把网络与站点侧
+抖动摊到两臂，最后取中位比。
+
+实测（CCTV 视频页，MuMu / Via 7.3.3 / Chrome 110，5 对交替）：
+
+| 指标 | 无脚本 | 有脚本 | 差 |
+| --- | --- | --- | --- |
+| 首次内容绘制 FCP | 203ms | 234ms | **+31ms** |
+| DOMContentLoaded | 297ms | 309ms | +12ms |
+| DOM 可交互 | 224ms | 239ms | +15ms |
+| 响应结束 | 40ms | 43ms | +3ms（网络噪声） |
+
+也就是一帧多一点，和「内联 hls.js 冷执行 24.8ms」那条对得上（上表）。结论：脚本确实有代价，
+量级是 1~2 帧，没有到影响使用的程度。
+
+这个对照在真机上踩了五个坑，都不看现场想不到：
+
+| 坑 | 现象 | 结论 |
+| --- | --- | --- |
+| https 页面里的 `GM_xmlhttpRequest` | 打 `http://127.0.0.1` 直接 `readyState=4, status=0`，同一个探针在 http 本地页上却正常 | WebView 的明文/混合内容策略。改让探针用 `GM_setValue` 写进 Via 自己的 `variables` 表，驱动用 adb 读库 |
+| `GM_setValue` 权限 | 探针不报错也不写值 | 权限按**脚本头的 `@grant`** 解析，只抄数据库里的 `grant` 列不够，必须在脚本头写明 |
+| Via 给值再编码一层 | 库里是 `"{\"url\":...}"`，`JSON.parse` 一次拿到的是字符串，字段全 `undefined` | 驱动要二次 `JSON.parse` |
+| 真实站点会重定向 | `?vvmab=1` 被吃掉，探针按参数判断就永远不干活 | 不靠 URL 参数武装；每轮开始前删键，按时间戳认新一轮 |
+| 重站点的 `load` 迟迟不来 | CCTV 视频页等到 20s 都没 `load`，按 `load` 采样等于没有数 | 用 `DOMContentLoaded` + 600ms 固定窗口（两臂同一窗口才可比），再加 12s 硬兜底 |
+
+还有一条：探针实际排在主脚本**之后**，所以「探针起步 → 首个宏任务」的差值恒为 0，量不到
+主脚本开销。主脚本的页面级代价只能看 `dcl / fcp` 的臂间差——不要把这个 0 当成「脚本没开销」。
+
 ## 已知限制（同油猴生态的共性）
 
 | 限制 | 说明 |
@@ -891,6 +923,8 @@ scripts/slow-media-verify.mjs  慢资源起播回归（slow/stall/dead 三场景
 scripts/mumu-slow.mjs  慢资源起播 · 真机对照（MuMu + Via，五场景页内自驱动；含两端口映射与限速服务）
 scripts/mumu-resume.mjs  续播起播耗时 · 真机测量（MuMu + Via，N 轮取中位数，`SAVE=1` 存基线后自动出对比）
 scripts/mumu-loading.mjs  起播封面 + 加载 ETA · 真机验证（MuMu + Via，6 场景页内自驱动；含 HLS 慢分片清单现生成、XHR 增量进度探针，16 项）
+scripts/mumu-real-ab.mjs  真实站点有/无脚本对照 · 真机验证（额外装 AB 探针，两臂都取数，交替 N 对取中位）
+scripts/mumu-hlsperf.mjs  内联 hls.js 每页成本量化 · 真机验证（冷/热执行、只建函数、dist 预解析）
 scripts/perf-heavy.mjs  重站性能对比（同一份负载切换"有/无脚本"，量化长任务/帧间隔/堆；含"主线程卡 2 秒不被误判成后台"检查）
 scripts/perf-playback.mjs  桌面播放态帧间隔基准（解除 headless 60Hz 节流 + 动态底层像素，对比无菜单 / 默认低特效 / 强制毛玻璃）
 scripts/mumu-perf-play.mjs  播放态模糊层真机帧率探针（MuMu + Via，60Hz 下 >25ms 判跳帧，三场景各 4s × 2 轮）
@@ -905,6 +939,7 @@ e2e/pip-share-android.html  小窗 / 导出浮层真机自驱动测试台：页�
 e2e/perf-play-android.html  播放态模糊层真机探针：页内 rAF 采样，无菜单 / 默认低特效 / 强制毛玻璃三场景各 4s × 2 轮上报帧间隔
 e2e/slow-android.html  慢资源起播真机测试台：五个限速场景逐个 drive `__vv.open`，每 300ms 采样判据/续命/错误卡并上报，失败带时间线
 e2e/resume-android.html  续播起播耗时真机测试台：播到设定秒数关掉再打开，记 metadata/seeking/seeked/playing 时间点，多轮取中位数
+e2e/ab-probe.user.js  真实站点 A/B 探针（极小脚本，两臂都装；用 GM_setValue 写 Via 库规避 https→localhost 的混合内容拦截）
 e2e/loading-android.html  起播封面 + 加载 ETA 真机测试台：条目封面/页面封面/无封面/慢网 mp4/慢网 HLS/XHR 进度六场景，含低特效不 blur 与 ETA 量级断言
 e2e/poster-a.svg / poster-b.svg  封面测试素材（SVG，避免多引一张位图）
 e2e/             真实网络测试页 + 实测截图 + 本地 mp4（实测产物写在 e2e/local/，不入库）

@@ -19,6 +19,17 @@
 
 ### 测试
 
+- 新增 `scripts/mumu-real-ab.mjs` + `e2e/ab-probe.user.js`：在真实站点上做「有脚本 / 无脚本」
+  对照，回答「装了脚本页面会不会变慢」。探针两臂都装、都用它取数，唯一变量是主脚本的
+  `enabled`。真机实测（CCTV 视频页，5 对交替取中位）：FCP 203→234ms（+31ms）、
+  DOMContentLoaded 297→309ms（+12ms）、DOM 可交互 224→239ms（+15ms），与「内联 hls.js
+  冷执行 24.8ms」的量级一致——代价约 1~2 帧，不影响使用
+- 这个对照踩到的五个真机坑（都写进 README）：https 页面里 `GM_xmlhttpRequest` 打
+  `http://127.0.0.1` 会被 WebView 明文策略拦掉（status=0），改走 `GM_setValue` + adb 读库；
+  `GM_setValue` 权限只认脚本头 `@grant`，抄数据库 `grant` 列不够；Via 会把写入的字符串再
+  序列化一层，读库要二次 `JSON.parse`；真实站点重定向会丢掉 `?vvmab=1`，不能靠 URL 参数武装；
+  重站点 20s 都不触发 `load`，只能按 `DOMContentLoaded` + 600ms 固定窗口采
+
 - 新增 `scripts/mumu-hlsperf.mjs` + `e2e/hlsperf-android.html`：真机量化「内联的 hls.js
   每打开一个页面要花多少时间」。hls.js 曾在 c34207d 改成按需编译、又在 c384204 整体回退，
   但当时没有量化数据说明值不值得做。实测（MuMu + Via 7.3.3 / Chrome 110）：冷执行中位
