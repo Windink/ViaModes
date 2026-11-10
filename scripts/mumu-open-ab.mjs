@@ -11,7 +11,11 @@
 //
 // 前置：MuMu 已启动、Via 已装脚本、adb 可连；本地服务由脚本自行拉起。
 // MODE=resume：只跑「看完再点开同一个视频」的复核，验续播位置修复。
-// 环境变量：ADB、SERIAL（默认 127.0.0.1:16384）、PORT（默认 8099）、SRC、MODE
+// MODE=hls：换 HLS 素材（默认 mux 的多档 VOD），网页臂 = 页面自己 new 插件内联的同一份
+//   hls.js 挂裸 <video>，插件臂 = __vv.open(type=HLS)，比的是「网页自己的 hls.js 播放」
+//   与「我们包一层之后」的差异。PHASE=churn 时播放器底下加一层一直在动的元素，
+//   模拟真实站点（弹幕/广告/轮播），验证「页面在动」是不是卡顿来源。
+// 环境变量：ADB、SERIAL（默认 127.0.0.1:16384）、PORT（默认 8099）、SRC、MODE、PHASE、ARMS
 import { execFileSync, spawn } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -23,8 +27,15 @@ const PORT = Number(process.env.PORT || 8099);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = process.cwd();
 const REPORT = join(ROOT, '.tmp/report.log');
-const SRC = process.env.SRC || 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_5MB.mp4';
+const SRC = process.env.SRC || (process.env.MODE === 'hls'
+    // 480p 单档：两臂都一样，ABR 不参与，量的纯粹是「包一层之后」的差异。
+    // 走 serve.mjs 的 /__hls 镜像（第一次从公网拉、之后本地缓存），
+    // 否则国内拉 mux 的 1080p 分片要 20s+，两臂都卡在网络上看不出播放器差异。
+    ? '/__hls?u=' + encodeURIComponent('https://test-streams.mux.dev/x36xhzz/url_6/193039199_mp4_h264_aac_hq_7.m3u8')
+    : 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_5MB.mp4');
 const MODE = process.env.MODE || 'ab';
+const PHASE = process.env.PHASE || 'quiet';
+const ARMS = process.env.ARMS || 'page,plugin';
 
 let server = null;
 function sh(args) {
@@ -58,6 +69,99 @@ function median(list) {
     return a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2;
 }
 
+// HLS 对照的报告：按「场景（静止/页面在动）× 臂」汇总。
+// 判据只看两件事——能不能出画、出画后卡不卡；档位交给 ABR，不当成失败条件
+// （带宽不够时停在低档是正常行为，压画质才是 bug）。
+function reportHls(rows) {
+    const arms = rows.filter((r) => r.tag === 'arm');
+    if (!arms.length) {
+        console.log('\n!! 没收到任何臂的数据' + (rows.find((r) => r.tag === 'fatal')
+            ? '：' + rows.find((r) => r.tag === 'fatal').err : ''));
+        process.exitCode = 1;
+        return;
+    }
+    const phases = [...new Set(arms.map((a) => a.phase || 'quiet'))];
+    let failed = 0;
+    for (const ph of phases) {
+        const inPh = arms.filter((a) => (a.phase || 'quiet') === ph);
+        console.log(`\n=== 场景：${ph === 'churn' ? '页面在动（弹幕/广告类）' : '页面静止'} ===`);
+        for (const a of inPh) {
+            console.log((`第${a.round}轮 ${a.arm}`).padEnd(18) +
+                '起播 ' + String(a.ttff ?? '-').padStart(8) + 'ms' +
+                '  清单 ' + String(a.manifest ?? '-').padStart(7) +
+                '  首帧 ' + String(a.loadeddata ?? '-').padStart(7) +
+                '  选档 ' + String((a.vh || a.lvlH || 0) + 'p').padStart(6) +
+                '  [' + String(a.frames ?? 0).padStart(3) + ' 帧 / avg ' + a.avgGap +
+                'ms / p95 ' + a.p95Gap + ' / 长帧 ' + a.slowRate + '%]' +
+                '  估算 ' + Math.round((a.est || 0) / 1000) + 'kbps  缓冲 ' + (a.buf ?? '-') + 's' +
+                (a.fatal ? '  FATAL=' + a.fatal : '') + (a.err ? '  ERR=' + a.err : ''));
+            // 里程碑拆解：起播到底卡在「引擎/缓冲」还是「合成出画」，
+            // 只看一个 TTFF 数字是分不出来的。
+            const mile = ['rs1', 'rs2', 'rs3', 'rs4', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting']
+                .filter((k) => a[k] != null)
+                .map((k) => k + '=' + Math.round(a[k]));
+            if (mile.length) console.log('    里程碑 ' + mile.join('  '));
+        }
+        const groups = [...new Set(inPh.map((a) => a.arm))];
+        const m = (g, k) => +median(inPh.filter((a) => a.arm === g).map((a) => a[k])).toFixed(1);
+        const pad = (s, n) => String(s).padStart(n);
+        console.log('\n指标（中位数）' + groups.map((g) => pad(g, 14)).join(''));
+        console.log('-'.repeat(18 + groups.length * 14));
+        for (const [label, k, unit] of [['起播到首帧', 'ttff', 'ms'], ['清单解析', 'manifest', 'ms'],
+            ['解码高度', 'vh', 'p'], ['出画后帧间隔', 'avgGap', 'ms'], ['长帧率', 'slowRate', '%'],
+            ['缓冲余量', 'buf', 's']]) {
+            console.log(label.padEnd(16) + groups.map((g) => pad(m(g, k) + unit, 14)).join(''));
+        }
+        const base = groups.includes('page') ? 'page' : groups[0];
+        if (groups.includes('plugin') && base !== 'plugin') {
+            const dT = m('plugin', 'ttff') - m(base, 'ttff');
+            const dS = m('plugin', 'slowRate') - m(base, 'slowRate');
+            console.log('\n起播差 ' + (dT >= 0 ? '+' : '') + dT.toFixed(0) + 'ms → ' +
+                (dT > 400 ? '插件明显更慢' : dT > 150 ? '插件略慢' : '两者基本一致'));
+            console.log('播放期长帧率差 ' + (dS >= 0 ? '+' : '') + dS.toFixed(2) + 'pp → ' +
+                (dS > 3 ? '出画后确实更卡，往 UI 合成/解码器方向查' : '出画后不卡'));
+            if (dT > 400 || dS > 3) failed++;
+        }
+        const bad = inPh.filter((a) => !(a.ttff > 0) || !(a.vh > 0) || a.frameHow === 'timeout');
+        if (bad.length) {
+            console.log('!! ' + bad.length + ' 个臂没拿到有效首帧：' +
+                bad.map((b) => JSON.stringify({ arm: b.arm, r: b.round, ttff: b.ttff, how: b.frameHow })).join(' '));
+            failed++;
+        }
+    }
+    if (failed) process.exitCode = 1;
+    else console.log('\n✓ 两臂都能出画，出画后的帧间隔没有实质差距');
+}
+
+// HLS 臂要比的是播放器，不是 CDN：先把本轮要用的分片拉一遍进本地缓存，
+// 之后两臂都从 loopback 取，网络这一项对双方才是一致的。
+async function warmHls() {
+    if (MODE !== 'hls') return;
+    const N = Number(process.env.WARM || 5);
+    const pl = SRC.charAt(0) === '/' ? BASE + SRC : SRC;
+    let txt = '';
+    try {
+        const r = await fetch(pl);
+        if (!r.ok) throw new Error('清单 ' + r.status);
+        txt = await r.text();
+    } catch (e) {
+        console.log('!! 预热失败：' + (e && e.message));
+        return;
+    }
+    const segs = txt.split('\n').map((l) => l.trim()).filter((l) => l && l[0] !== '#').slice(0, N);
+    if (!segs.length) { console.log('!! 清单里没有分片'); return; }
+    console.log(`预热 ${segs.length} 个分片（第一次从公网拉，之后两臂都走本地缓存）…`);
+    for (let i = 0; i < segs.length; i++) {
+        const u = segs[i].charAt(0) === '/' ? BASE + segs[i] : segs[i];
+        const t = Date.now();
+        try {
+            const r = await fetch(u);
+            const b = await r.arrayBuffer();
+            console.log(`  分片 ${i + 1}/${segs.length}  ${r.status}  ${(b.byteLength / 1024).toFixed(0)}KB  ${Date.now() - t}ms`);
+        } catch (e) { console.log(`  分片 ${i + 1} 失败：${e && e.message}`); }
+    }
+}
+
 try {
     mkdirSync(join(ROOT, '.tmp'), { recursive: true });
     console.log(await ensureServer());
@@ -69,13 +173,18 @@ try {
     sh(['reverse', `tcp:${PORT}`, `tcp:${PORT}`]);
 
     await fetch(BASE + '/__report/clear');
+    console.log('素材: ' + SRC);
+    await warmHls();
     const distVer = (readFileSync(join(ROOT, 'dist/via-video-player.user.js'), 'utf8')
         .match(/@version\s+([\d.]+)/) || [])[1] || '';
     const pageTag = 'r' + Date.now();
-    const url = `${BASE}/e2e/open-ab-android-${pageTag}.html?vvdebug=1&expect=${distVer}` +
-        `&src=${encodeURIComponent(SRC)}` + (MODE === 'resume' ? '&mode=resume' : '');
+    const pageBase = MODE === 'hls' ? 'open-ab-hls-android' : 'open-ab-android';
+    const url = `${BASE}/e2e/${pageBase}-${pageTag}.html?vvdebug=1&expect=${distVer}` +
+        `&src=${encodeURIComponent(SRC)}` + (MODE === 'resume' ? '&mode=resume' : '') +
+        (MODE === 'hls' ? `&arms=${encodeURIComponent(ARMS)}&phase=${encodeURIComponent(PHASE)}` +
+            (process.env.ROUNDS ? `&rounds=${encodeURIComponent(process.env.ROUNDS)}` : '') : '');
     console.log('期望脚本版本: v' + distVer + '  ·  本轮标识 ' + pageTag);
-    console.log('素材: ' + SRC + '\n');
+    console.log("");
     sh(['shell', 'am force-stop mark.via']);
     await sleep(1000);
     sh(['shell', `am start -n mark.via/.Shell -a android.intent.action.VIEW -d '${url}'`]);
@@ -83,7 +192,8 @@ try {
 
     let done = false;
     let rows = [];
-    for (let i = 0; i < 400; i++) {
+    const maxWait = MODE === 'hls' ? (PHASE === 'both' ? 1400 : 800) : 400;
+    for (let i = 0; i < maxWait; i++) {
         await sleep(300);
         rows = readRows().filter((r) => r.run === pageTag);
         if (rows.some((r) => r.tag === 'done')) { done = true; break; }
@@ -107,6 +217,9 @@ try {
             console.log(r.ok ? '✓ 从 0 重新开始，没有「点开就自己关」' : '✗ 仍然异常：' + JSON.stringify(r));
             if (!r.ok) process.exitCode = 1;
         }
+    } else if (MODE === 'hls') {
+        console.log('场景: ' + PHASE + '  ·  臂: ' + ARMS);
+        reportHls(rows);
     } else {
     const arms = rows.filter((r) => r.tag === 'arm');
     const nats = arms.filter((a) => a.arm === 'native');

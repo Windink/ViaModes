@@ -17,6 +17,28 @@
 
 ## 未发布
 
+### 新增
+
+- `serve.mjs` 加 `/__hls?u=<远程地址>` 镜像代理：清单与分片按 URL 缓存到 `.tmp/hlscache`，
+  清单里的相对地址改写成同样的代理地址。公网测试流（mux / test-videos）从国内拉一个
+  1080p 分片要 20s+，两臂都卡在网络上，量出来的只是 CDN 速度；镜像之后第一次慢、
+  之后两臂都走 loopback，比的才是播放器本身
+- `e2e/open-ab-hls-android.html` + `mumu-open-ab.mjs` 的 `MODE=hls`：网页臂用
+  **插件内联的同一份 hls.js**（同一构建，本地服务提供）挂裸 `<video>`，插件臂走
+  `__vv.open(type=HLS)`，比同一个 m3u8 的起播与出画后帧间隔；`PHASE=churn` 时播放器
+  底下叠一层一直在动的元素（CSS 动画 + 每帧重绘的 canvas），模拟真实站点的弹幕/广告
+- 报告加里程碑拆解（`rs1/rs4`、`loadedmetadata/loadeddata/canplay/playing/waiting`），
+  一个 TTFF 数字分不出「卡在引擎缓冲」还是「卡在合成出画」
+
+### 测试
+
+- 真机 HLS 对照（MuMu + Via 7.3.3 / WebView 110，v0.1.73，480p 单档、分片已预热）：
+  页面静止 5 轮中位数——起播 网页 1249ms / 内置 1004ms，出画后帧间隔 17.1ms vs 17.3ms，
+  长帧率 2.3% vs 3.5%；页面在动 5 轮中位数——起播 1006ms vs 1162ms，帧间隔 17.6 vs 17.3ms，
+  长帧率 4.1% vs 3.5%。两臂都在同一档噪声里，**内置播放器在 HLS 链路上也没有额外开销**
+- 里程碑拆解说明差异在哪：内置臂 `loadedmetadata`→`loadeddata` 比网页臂多 100–200ms
+  （多一次布局/合成），`waiting` 两者都在 20–60ms，引擎侧没有差别
+
 ## v0.1.72–v0.1.73 — 2026-11-10
 
 ### 修复

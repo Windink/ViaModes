@@ -1,10 +1,12 @@
 import http from 'node:http';
-import { createReadStream, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { createReadStream, readFileSync, appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
+import { createHash } from 'node:crypto';
 
 const root = process.cwd();
 const port = Number(process.env.PORT || 8099);
+const HLS_CACHE = join(root, '.tmp', 'hlscache');
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -68,7 +70,61 @@ http.createServer(async (req, res) => {
     // 画质红线真机验证台同理
     if (/^\/e2e\/quality-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/quality-android.html';
     if (/^\/e2e\/open-ab-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-android.html';
+    if (/^\/e2e\/open-ab-hls-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-hls-android.html';
+    // HLS 对照页的「网页臂」必须用插件内联的同一份 hls.js（light 构建），
+    // 否则比的是 hls.js 两个构建的差异，不是播放器本身的差异。
+    if (/^\/e2e\/vendor\/hls-light(?:-[A-Za-z0-9._-]+)?\.js$/.test(pathname)) pathname = '/vendor/hls.light.min.js';
     if (/^\/e2e\/vendor\/hls-[A-Za-z0-9._-]+\.js$/.test(pathname)) pathname = '/e2e/vendor/hls.min.js';
+    // HLS 镜像代理：/__hls?u=<远程绝对地址>
+    // 为什么需要：公网测试流（mux / test-videos）从国内拉一个 1080p 分片要 20s+，
+    // 两臂都卡在网络上，量出来的只是 CDN 速度。这里把清单和分片按 URL 缓存到本地磁盘，
+    // 第一次慢、之后两臂都走 loopback，才是「播放器本身的差异」。
+    // 清单里的相对地址会被改写成同样的代理地址（子清单 / 分片都是相对路径）。
+    if (pathname === '/__hls') {
+      const q = new URL(req.url, 'http://x');
+      const target = q.searchParams.get('u') || '';
+      if (!/^https?:\/\//.test(target)) { res.statusCode = 400; res.end('400 bad u'); return; }
+      const key = createHash('sha1').update(target).digest('hex');
+      const ext = (/\.[A-Za-z0-9]+$/.exec(target.split('?')[0]) || ['.bin'])[0];
+      const isPlaylist = ext === '.m3u8';
+      const cacheFile = join(HLS_CACHE, key + ext);
+      let buf = null;
+      try { if (!isPlaylist) buf = readFileSync(cacheFile); } catch (e) {}
+      if (!buf) {
+        const up = await fetch(target, {
+          headers: {
+            // 部分 CDN 对非浏览器 UA 限速；带上移动 UA 更接近真实播放
+            'user-agent': 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/110 Mobile Safari/537.36',
+            accept: '*/*'
+          }
+        });
+        if (!up.ok) {
+          res.statusCode = up.status;
+          res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+          res.end('upstream ' + up.status + ' ' + target);
+          return;
+        }
+        buf = Buffer.from(await up.arrayBuffer());
+        if (!isPlaylist) {
+          try { mkdirSync(HLS_CACHE, { recursive: true }); writeFileSync(cacheFile, buf); } catch (e) {}
+        }
+      }
+      let body = buf, ct = isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/mp2t';
+      if (isPlaylist) {
+        const prox = (u) => '/__hls?u=' + encodeURIComponent(new URL(u, target).href);
+        body = Buffer.from(buf.toString('utf8').split('\n').map((line) => {
+          const s = line.trim();
+          if (!s) return line;
+          if (s[0] !== '#') return prox(s);                       // 子清单 / 分片
+          return line.replace(/URI="([^"]+)"/g, (_m, u) => 'URI="' + prox(u) + '"');  // KEY / MAP
+        }).join('\n'));
+      }
+      res.setHeader('Content-Type', ct);
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      res.setHeader('Content-Length', String(body.length));
+      res.end(body);
+      return;
+    }
     // 防盗链测试端点：没有 Referer 一律 403，用来验证"外链自检"能识别出防盗链
     if (pathname === '/guard/stream.m3u8') {
         if (!req.headers.referer) {

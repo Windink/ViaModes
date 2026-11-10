@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>起播对照 · HLS（网页 hls.js vs 内置播放器）</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 15px; margin: 0 0 4px; position: relative; z-index: 2; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; position: relative; z-index: 2; }
+  video { width: 200px; max-width: 100%; background: #000; position: relative; z-index: 2; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 「页面在动」干扰层：真实站点（弹幕/广告/轮播）在播放器底下一直在动。
+     z-index 0 沉在最底，播放器仍然盖在它上面，但合成器要连它一起合成。 */
+  #churn { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; display: none; }
+  #churn i { position: absolute; width: 34px; height: 34px; border-radius: 10px;
+      background: linear-gradient(135deg, #7aa2ff, #b4f); opacity: .55;
+      animation: chmv 1.4s linear infinite alternate; }
+  @keyframes chmv { from { transform: translate3d(0, 0, 0) scale(.7); }
+                    to { transform: translate3d(46px, 30px, 0) scale(1.9); } }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>起播对照：同一路 HLS，网页 hls.js vs 内置播放器</h1>
+<p>网页臂用<strong>插件自己内联的那份 hls.js</strong>（同一构建，本地服务提供）挂页面 &lt;video&gt;，内置臂走 <code>__vv.open</code>。两臂同一路流、交替顺序跑两轮；<code>phase=churn</code> 时播放器底下有一层一直在动的元素，用来验证「页面在动」是不是卡顿来源。</p>
+<div id="churn"></div>
+<video id="pv" muted playsinline preload="auto"></video>
+
+<script>
+(function () {
+    'use strict';
+    var HUD = document.getElementById('hud');
+    var RUN = (/open-ab-hls-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var Q = new URLSearchParams(location.search);
+    var SRC = Q.get('src') || 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+    var ARMS = (Q.get('arms') || 'page,plugin').split(',').filter(Boolean);
+    var PHASE = Q.get('phase') || 'quiet';          // quiet | churn | both
+    var SAMPLE_MS = 3000, ROUNDS = Math.max(1, Number(Q.get('rounds') || 2));
+
+    function hud(s) { HUD.textContent = s; }
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function ms(t0) { return +(performance.now() - t0).toFixed(1); }
+    // 每个臂一条独立 URL：主清单的查询串不影响子清单解析（相对路径会丢掉查询串），
+    // 所以这只破主清单的缓存，分片是否命中 WebView 缓存靠交替顺序去抵消。
+    function armUrl(arm, round) {
+        return SRC + (SRC.indexOf('?') < 0 ? '?' : '&') + 'ab=' + arm + round + '_' + Date.now();
+    }
+
+    // ---- 页面在动：CSS 动画 + 每帧重绘的 canvas，模拟弹幕/广告/轮播 ----
+    var CH = { on: false, cv: null, ctx: null, els: 0, raf: 0 };
+    function churnOn() {
+        if (CH.on) return;
+        CH.on = true;
+        var box = document.getElementById('churn');
+        box.style.display = 'block';
+        var n = 24, html = '';
+        for (var i = 0; i < n; i++) {
+            var x = Math.round((i % 8) * 13 + (i * 7) % 11);
+            var y = Math.round((i % 6) * 15 + (i * 3) % 9);
+            html += '<i style="left:' + x + '%;top:' + y + '%;animation-delay:-' + (i % 9) * 0.17 +
+                's;animation-duration:' + (1.1 + (i % 5) * 0.13).toFixed(2) + 's"></i>';
+        }
+        box.innerHTML = html;
+        CH.els = n;
+        if (!CH.cv) {
+            CH.cv = document.createElement('canvas');
+            CH.cv.width = 640; CH.cv.height = 360;
+            CH.cv.style.cssText = 'position:absolute;left:0;bottom:0;width:100%;opacity:.7';
+            box.appendChild(CH.cv);
+            CH.ctx = CH.cv.getContext('2d');
+        }
+        var t = 0;
+        (function draw() {
+            if (!CH.on) return;
+            var c = CH.ctx, w = 640, h = 360;
+            if (c) {
+                c.fillStyle = 'rgba(20,24,40,.35)'; c.fillRect(0, 0, w, h);
+                for (var k = 0; k < 90; k++) {
+                    t += 0.017;
+                    var px = (k * 71 + Math.sin(t + k) * 60) % w;
+                    var py = (k * 37 + Math.cos(t * 1.3 + k) * 40) % h;
+                    c.fillStyle = k % 3 ? 'rgba(140,180,255,.75)' : 'rgba(255,200,120,.75)';
+                    c.fillRect(px, py, 26, 9);
+                }
+            }
+            CH.raf = requestAnimationFrame(draw);
+        })();
+    }
+    function churnOff() {
+        if (!CH.on) return;
+        CH.on = false;
+        cancelAnimationFrame(CH.raf);
+        var box = document.getElementById('churn');
+        box.innerHTML = '';
+        box.style.display = 'none';
+        CH.els = 0;
+    }
+
+    // ---- rAF 采样器：一条链常驻，按窗口重置 ----
+    var pb = { gaps: [], last: 0, until: 0 };
+    function beat(t) {
+        if (pb.last && t <= pb.until && pb.gaps.length < 4000) pb.gaps.push(+(t - pb.last).toFixed(2));
+        pb.last = t;
+        requestAnimationFrame(beat);
+    }
+    requestAnimationFrame(beat);
+    function reset(ms2) { pb.gaps.length = 0; pb.last = 0; pb.until = ms2 ? performance.now() + ms2 : 0; }
+    function stats() {
+        var g = pb.gaps.slice().sort(function (x, y) { return x - y; });
+        var sum = 0, slow = 0;
+        for (var i = 0; i < g.length; i++) { sum += g[i]; if (g[i] > 25) slow++; }
+        return {
+            frames: g.length,
+            avgGap: g.length ? +(sum / g.length).toFixed(2) : 0,
+            p95Gap: g.length ? g[Math.min(g.length - 1, Math.floor(g.length * 0.95))] : 0,
+            slowRate: g.length ? +(slow / g.length * 100).toFixed(2) : 0
+        };
+    }
+
+    function firstFrame(v, t0, out) {
+        return new Promise(function (res) {
+            var done = false;
+            function fin(how) {
+                if (done) return;
+                done = true;
+                out.frame = ms(t0);
+                out.frameHow = how;
+                try { out.vw = v.videoWidth; out.vh = v.videoHeight; } catch (e) {}
+                res();
+            }
+            try { if (v.requestVideoFrameCallback) v.requestVideoFrameCallback(function () { fin('rvfc'); }); } catch (e0) {}
+            v.addEventListener('playing', function () { setTimeout(function () { fin('playing'); }, 0); }, { once: true });
+            setTimeout(function () { fin('timeout'); }, 25000);
+        });
+    }
+    function bindMilestones(v, t0, out) {
+        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled'].forEach(function (n) {
+            v.addEventListener(n, function () {
+                if (out[n] === undefined) out[n] = ms(t0);
+            });
+        });
+    }
+
+    // ---- 网页臂：页面上自己 new 一个 hls.js（用插件内联的同一份构建）----
+    var Ctor = null, H = null;
+    function ensureHls() {
+        if (Ctor) return Promise.resolve(Ctor);
+        return new Promise(function (res) {
+            if (window.Hls && window.Hls.isSupported) { Ctor = window.Hls; return res(Ctor); }
+            var s = document.createElement('script');
+            // 破缓存别名：Via 按 URL 路径缓存子资源，换路径才拿得到新内容
+            s.src = '/e2e/vendor/hls-light-' + Date.now() + '.js';
+            s.onload = function () { Ctor = window.Hls || null; res(Ctor); };
+            s.onerror = function () { Ctor = null; res(null); };
+            document.head.appendChild(s);
+        });
+    }
+
+    function stopPageMedia() {
+        if (H) { try { H.destroy(); } catch (e) {} H = null; }
+        var v = document.getElementById('pv');
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    }
+
+    async function armPage(round, phase, tag) {
+        var out = { tag: 'arm', arm: tag, round: round, phase: phase };
+        var C = await ensureHls();
+        if (!C) { out.err = 'hls.js 没加载出来'; send(out); return out; }
+        stopPageMedia();
+        await wait(300);
+        var v = document.getElementById('pv');
+        reset(0);
+        var url = armUrl(tag, round);
+        var cfg = {};
+        if (tag === 'pagecfg') {                       // 同一份配置、同一个裸 <video>
+            try { cfg = window.__vv.hlsConfig() || {}; } catch (e) { out.cfgErr = String(e && e.message || e); }
+        }
+        out.cfgVv = tag === 'pagecfg' ? 1 : 0;
+        var t0 = performance.now();
+        bindMilestones(v, t0, out);
+        H = new C(cfg);
+        H.on(C.Events.MANIFEST_PARSED, function () {
+            out.manifest = ms(t0);
+            out.levels = (H.levels || []).length;
+            out.levelH = (H.levels || []).map(function (l) { return l.height; }).join('/');
+        });
+        H.on(C.Events.LEVEL_SWITCHED, function () {
+            (out.switches = out.switches || []).push(H.currentLevel);
+        });
+        H.on(C.Events.ERROR, function (_e, d) {
+            if (d && d.fatal) out.fatal = d.type + '/' + d.details;
+        });
+        H.attachMedia(v);
+        H.on(C.Events.MEDIA_ATTACHED, function () { try { H.loadSource(url); } catch (e) {} });
+        try { v.play().catch(function (e) { out.playErr = String(e && e.name || e); }); } catch (e) { out.playErr = 'throw'; }
+
+        await firstFrame(v, t0, out);
+        out.ttff = out.frame;
+        if (!(out.vh > 0)) { send(out); return out; }
+        reset(SAMPLE_MS);
+        await wait(SAMPLE_MS + 120);
+        Object.assign(out, stats());
+        try {
+            out.cur = +(+v.currentTime || 0).toFixed(2);
+            out.lvl = H.currentLevel;
+            out.lvlH = (H.levels && H.levels[H.currentLevel] || {}).height || 0;
+            out.est = Math.round(H.bandwidthEstimate || 0);
+            out.buf = v.buffered.length ? +(v.buffered.end(v.buffered.length - 1) - v.currentTime).toFixed(2) : 0;
+        } catch (e) {}
+        send(out);
+        stopPageMedia();
+        return out;
+    }
+
+    async function armPlugin(round, phase) {
+        var out = { tag: 'arm', arm: 'plugin', round: round, phase: phase };
+        stopPageMedia();
+        await wait(300);
+        reset(0);
+        var url = armUrl('p', round);
+        var t0 = performance.now();
+        try { window.__vv.open({ url: url, type: 'HLS', name: 'ab-hls-' + round }); }
+        catch (e) { out.openErr = String(e && e.message || e); send(out); return out; }
+
+        // 元素是播放器建出来的：拿到的那一刻就开始等首帧；且必须「在文档内、属于播放器根节点」，
+        // 否则会抓到上一轮 close() 残留的游离节点（loadeddata 会触发，但永不出帧）。
+        var v = null, ff = null, lastRs = -1, trace = [];
+        for (var i = 0; i < 800; i++) {
+            if (!v) {
+                var cand = document.querySelectorAll('.vv-player-video');
+                for (var k = 0; k < cand.length; k++) {
+                    var c = cand[k];
+                    if (document.contains(c) && c.closest && c.closest('#vv-player-root')) { v = c; break; }
+                }
+                if (v) {
+                    out.elAppear = ms(t0);
+                    bindMilestones(v, t0, out);
+                    ff = firstFrame(v, t0, out);
+                }
+            }
+            if (v) {
+                if (v.readyState !== lastRs) { lastRs = v.readyState; out['rs' + lastRs] = ms(t0); }
+                if (trace.length < 60 && i % 4 === 0) {
+                    trace.push({ t: Math.round(ms(t0)), rs: v.readyState, p: v.paused ? 1 : 0,
+                        ct: +(+v.currentTime || 0).toFixed(2), dom: document.contains(v) ? 1 : 0 });
+                }
+                if (out.frame !== undefined) break;
+            }
+            await wait(16);
+        }
+        out.trace = trace;
+        if (!v) { out.err = '没找到在文档里的 .vv-player-video'; send(out); return out; }
+        await ff;
+        out.ttff = out.frame;
+        out.inDom = document.contains(v) ? 1 : 0;
+        if (!(out.vh > 0)) { send(out); return out; }
+        reset(SAMPLE_MS);
+        await wait(SAMPLE_MS + 120);
+        Object.assign(out, stats());
+        try {
+            out.cur = +(+v.currentTime || 0).toFixed(2);
+            var act = window.__vv.VV.active;
+            var inst = act && (act.hls || act.hlsInst);
+            out.hasInst = inst ? 1 : 0;
+            if (inst) {
+                out.levels = (inst.levels || []).length;
+                out.lvl = inst.currentLevel;
+                out.lvlH = (inst.levels && inst.levels[inst.currentLevel] || {}).height || 0;
+                out.est = Math.round(inst.bandwidthEstimate || 0);
+                out.levelH = (inst.levels || []).map(function (l) { return l.height; }).join('/');
+            }
+            out.buf = v.buffered.length ? +(v.buffered.end(v.buffered.length - 1) - v.currentTime).toFixed(2) : 0;
+            var root = document.getElementById('vv-player-root');
+            out.lowFx = root && root.className.indexOf('vv-lowfx') >= 0 ? 1 : 0;
+        } catch (e2) {}
+        send(out);
+        try { window.__vv.close(); } catch (e) {}
+        await wait(900);
+        return out;
+    }
+
+    async function runPhase(phase) {
+        if (phase === 'churn') churnOn(); else churnOff();
+        for (var r = 0; r < ROUNDS; r++) {
+            // 交替顺序：单数轮插件先，抵消「后跑的那个吃到缓存」的系统偏差
+            var order = r % 2 === 0 ? ARMS : ARMS.slice().reverse();
+            for (var i = 0; i < order.length; i++) {
+                hud((phase === 'churn' ? '页面在动 · ' : '') + '第' + (r + 1) + '轮 · ' + order[i]);
+                if (order[i] === 'plugin') await armPlugin(r + 1, phase);
+                else await armPage(r + 1, phase, order[i]);
+                await wait(700);
+            }
+            await wait(600);
+        }
+        churnOff();
+    }
+
+    async function main() {
+        for (var i = 0; i < 120; i++) {
+            if (window.__vv && window.__vv.VV) break;
+            await wait(100);
+        }
+        var env = { tag: 'env' };
+        try {
+            env.version = (window.__vv && window.__vv.VV && window.__vv.VV.version) || 'n/a';
+            env.hasVv = !!(window.__vv && window.__vv.VV);
+            // 本页要量的是播放本身，页面自己的 video 不能被自动播放拦截按住
+            window.__vv.VV.cfg.pageAutoplay = true;
+            env.src = SRC; env.arms = ARMS.join(','); env.phase = PHASE;
+            env.vw = window.innerWidth; env.vh = window.innerHeight; env.dpr = window.devicePixelRatio;
+            env.hlsInline = !!(window.__vvHlsCtor || window.Hls);
+        } catch (e) { env.err = String(e && e.message || e); }
+        // 先把 hls.js 装进页面：真实站点是在页面加载时就带上了它，
+        // 轮到第一个「网页臂」才去下 380KB 会把这笔一次性开销算进它的起播时间里。
+        try { await ensureHls(); } catch (e) {}
+        env.hlsReady = Ctor ? 1 : 0;
+        send(env);
+
+        var phases = PHASE === 'both' ? ['quiet', 'churn'] : [PHASE];
+        for (var p = 0; p < phases.length; p++) await runPhase(phases[p]);
+        hud('完成');
+        send({ tag: 'done' });
+    }
+    main().catch(function (e) {
+        send({ tag: 'fatal', err: String(e && e.message || e) });
+        send({ tag: 'done' });
+    });
+})();
+</script>
+</body>
+</html>
