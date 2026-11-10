@@ -1633,12 +1633,28 @@ function vvLoadHls(cb) {
     tryNext();
 }
 
+// 该不该续播、续到哪儿。
+// 关键一条：上次已经看到结尾附近就不要再跳过去——跳过去会立刻 ended，1.6s 后播放器
+// 自己关掉，用户看到的是「点开闪一下就没」，很容易被当成播放器坏了。
+// 短片（<60s）按剩余 10%（至少 3s）判，长片固定留 15s。
+function vvResumeTarget(d, duration) {
+    var dur = (duration && isFinite(duration)) ? duration : 0;
+    var maxT = dur ? Math.max(0, dur - 0.1) : 0;
+    var t = (d && d.t > 5) ? (maxT ? Math.min(d.t, maxT) : d.t) : 0;
+    if (t && dur) {
+        var tail = dur < 60 ? Math.max(3, dur * 0.1) : 15;
+        if (dur - t <= tail) t = 0;
+    }
+    return t;
+}
+
 function vvBindVideo() {
     VID.addEventListener('loadedmetadata', function () {
         try {
             var d = VV.active && VV.active.resumeInfo;
-            var maxT = (VID.duration && isFinite(VID.duration)) ? Math.max(0, VID.duration - 0.1) : 0;
-            var resumeT = d && d.t > 5 ? (maxT ? Math.min(d.t, maxT) : d.t) : 0;
+            var dur = (VID.duration && isFinite(VID.duration)) ? VID.duration : 0;
+            var maxT = dur ? Math.max(0, dur - 0.1) : 0;
+            var resumeT = vvResumeTarget(d, dur);
             if (resumeT > 5 && Math.abs(VID.currentTime - resumeT) > 3) {
                 VID.currentTime = resumeT;
                 // HLS 续播时让 hls.js 直接从目标位置拉流，避免只 seek 不加载而卡住
@@ -1878,6 +1894,9 @@ function vvSaveNow() {
         var t = VID.currentTime;
         var d = VID.duration || 0;
         if (!t || t < 4) return;
+        // 已经播完的不记位置：ended 时 vvOnEnded 把记录清零了，但紧接着的 pause/close
+        // 又会把结尾位置写回去，下次打开就变成「跳结尾 → 立刻结束 → 自己关掉」。
+        try { if (VID.ended) return; } catch (eE) {}
         // 直播没有可续播的位置，记下来只会让下次进同一频道时莫名其妙跳到某处
         if (!isFinite(d) || vvIsLive()) return;
         var m = vvGetProgressMap();

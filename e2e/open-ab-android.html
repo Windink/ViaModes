@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>起播对照 · 原生 video vs 内置播放器</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  video { width: 200px; max-width: 100%; background: #000; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>起播对照：同一路 mp4，原生 video vs 内置播放器</h1>
+<p>只量「点下去到出第一帧」以及出画后 rAF 帧间隔。每个臂用独立 URL 保证冷起播（也避开位置续播），两轮交替顺序抵消下载先后偏差。素材来自 test-videos.co.uk 的公开测试片。</p>
+<video id="nv" muted playsinline preload="auto"></video>
+
+<script>
+(function () {
+    'use strict';
+    var HUD = document.getElementById('hud');
+    var RUN = (/open-ab-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+    var Q = new URLSearchParams(location.search);
+    var SRC = Q.get('src') || 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4';
+    var SAMPLE_MS = 3000, ROUNDS = 2;
+
+    function hud(s) { HUD.textContent = s; }
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    // 每个臂一条独立 URL：既保证冷起播，也避免读到底上一次留下的续播位置
+    function armUrl(arm, round) {
+        return SRC + (SRC.indexOf('?') < 0 ? '?' : '&') + 'ab=' + arm + round + '_' + Date.now();
+    }
+
+    // ---- rAF 采样器：一条链常驻，按窗口重置 ----
+    var pb = { gaps: [], last: 0, until: 0 };
+    function beat(t) {
+        if (pb.last && t <= pb.until && pb.gaps.length < 4000) pb.gaps.push(+(t - pb.last).toFixed(2));
+        pb.last = t;
+        requestAnimationFrame(beat);
+    }
+    requestAnimationFrame(beat);
+    function reset(ms) { pb.gaps.length = 0; pb.last = 0; pb.until = ms ? performance.now() + ms : 0; }
+    function stats() {
+        var g = pb.gaps.slice().sort(function (x, y) { return x - y; });
+        var sum = 0, slow = 0;
+        for (var i = 0; i < g.length; i++) { sum += g[i]; if (g[i] > 25) slow++; }
+        return {
+            frames: g.length,
+            avgGap: g.length ? +(sum / g.length).toFixed(2) : 0,
+            p95Gap: g.length ? g[Math.min(g.length - 1, Math.floor(g.length * 0.95))] : 0,
+            slowRate: g.length ? +(slow / g.length * 100).toFixed(2) : 0
+        };
+    }
+
+    // 首帧：优先 rVFC（真实合成出画），退回 playing + readyState
+    function firstFrame(v, t0, out) {
+        return new Promise(function (res) {
+            var done = false;
+            function fin(how) {
+                if (done) return;
+                done = true;
+                out.frame = +(performance.now() - t0).toFixed(1);
+                out.frameHow = how;
+                try { out.vw = v.videoWidth; out.vh = v.videoHeight; } catch (e) {}
+                res();
+            }
+            try {
+                if (v.requestVideoFrameCallback) {
+                    v.requestVideoFrameCallback(function () { fin('rvfc'); });
+                }
+            } catch (e0) {}
+            v.addEventListener('playing', function () { setTimeout(function () { fin('playing'); }, 0); }, { once: true });
+            setTimeout(function () { fin('timeout'); }, 20000);
+        });
+    }
+    function bindMilestones(v, t0, out) {
+        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled'].forEach(function (n) {
+            v.addEventListener(n, function () {
+                if (out[n] === undefined) out[n] = +(performance.now() - t0).toFixed(1);
+            });
+        });
+    }
+
+    async function armNative(round) {
+        var v = document.getElementById('nv');
+        v.style.display = '';
+        var out = { tag: 'arm', arm: 'native', round: round };
+        reset(0);
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        await wait(250);
+        var url = armUrl('n', round);
+        var t0 = performance.now();
+        bindMilestones(v, t0, out);
+        v.src = url;
+        try { v.load(); } catch (e) {}
+        try { v.play().catch(function (e) { out.playErr = String(e && e.name || e); }); } catch (e) { out.playErr = 'throw'; }
+        await firstFrame(v, t0, out);
+        out.ttff = out.frame;
+        if (!(out.vh > 0)) { send(out); return out; }
+        reset(SAMPLE_MS);
+        await wait(SAMPLE_MS + 120);
+        Object.assign(out, stats());
+        out.cur = +(+v.currentTime || 0).toFixed(2);
+        send(out);
+        try { v.pause(); } catch (e) {}
+        return out;
+    }
+
+    async function armPlugin(round) {
+        var out = { tag: 'arm', arm: 'plugin', round: round };
+        reset(0);
+        await wait(250);
+        var url = armUrl('p', round);
+        var t0 = performance.now();
+        try {
+            window.__vv.open({ url: url, type: 'MP4', name: 'ab-' + round });
+        } catch (e) { out.openErr = String(e && e.message || e); send(out); return out; }
+
+        // 元素是播放器建出来的：轮询拿到它，**拿到的那一刻就开始等首帧**。
+        // （早前版本拿到元素后还空转到轮询结束才等首帧，量出来的 8s 全是探针自己的耗时。）
+        // 必须是「在当前文档里、且在播放器根节点内」的那个，否则会抓到上一轮 close() 后
+        // 残留的游离节点：它的 loadeddata 会正常触发，但永远不出帧。
+        var v = null, ff = null, rs = {}, lastRs = -1, trace = [];
+        for (var i = 0; i < 700; i++) {
+            if (!v) {
+                var cand = document.querySelectorAll('.vv-player-video');
+                for (var k = 0; k < cand.length; k++) {
+                    var c = cand[k];
+                    if (document.contains(c) && c.closest && c.closest('#vv-player-root')) { v = c; break; }
+                }
+                if (v) {
+                    out.elAppear = +(performance.now() - t0).toFixed(1);
+                    bindMilestones(v, t0, out);
+                    ff = firstFrame(v, t0, out);
+                }
+            }
+            if (v) {
+                if (v.readyState !== lastRs) {
+                    lastRs = v.readyState;
+                    rs['rs' + lastRs] = +(performance.now() - t0).toFixed(1);
+                }
+                if (trace.length < 60 && i % 4 === 0) {
+                    trace.push({ t: +(performance.now() - t0).toFixed(0), rs: v.readyState,
+                        p: v.paused ? 1 : 0, ct: +(+v.currentTime || 0).toFixed(2),
+                        dom: document.contains(v) ? 1 : 0, vis: v.offsetWidth > 0 ? 1 : 0,
+                        act: !!(window.__vv.VV && window.__vv.VV.playerActive) ? 1 : 0 });
+                }
+                if (out.frame !== undefined) break;   // 已经出帧，别再空转
+            }
+            await wait(16);
+        }
+        out.trace = trace;
+        if (!v) { out.err = '没找到在文档里的 .vv-player-video'; send(out); return out; }
+        await ff;                                  // 兜住「轮询结束那一刻刚好出帧」的竞态
+        out.ttff = out.frame;
+        out.inDom = document.contains(v) ? 1 : 0;
+        if (!(out.vh > 0)) { send(out); return out; }
+        reset(SAMPLE_MS);
+        await wait(SAMPLE_MS + 120);
+        Object.assign(out, stats());
+        out.cur = +(+v.currentTime || 0).toFixed(2);
+        try { out.visW = v.offsetWidth; } catch (e) {}
+        send(out);
+        try { window.__vv.close(); } catch (e) {}
+        await wait(700);
+        return out;
+    }
+
+    // 「看完一个视频，再点开同一个视频」：回退前会 seek 到结尾、立刻 ended、1.6s 后
+    // 播放器自己关掉。这里两次打开用同一个 URL（不做缓存消歧），复现的就是这条路径。
+    async function resumePhase() {
+        var url = SRC + (SRC.indexOf('?') < 0 ? '?' : '&') + 'res=' + Date.now();
+        var out = { tag: 'resume' };
+        try { window.__vv.open({ url: url, type: 'MP4', name: 'res-1' }); } catch (e) { out.open1Err = String(e && e.message || e); send(out); return; }
+        // 等第一遍自己播到结束（10s 素材，给足 14s）；结束时播放器会自己关掉
+        var closed = false;
+        for (var i = 0; i < 160; i++) {
+            await wait(100);
+            if (!(window.__vv.VV && window.__vv.VV.playerActive)) { closed = true; break; }
+        }
+        out.closedBySelf = closed ? 1 : 0;
+        await wait(600);
+
+        try { window.__vv.open({ url: url, type: 'MP4', name: 'res-2' }); } catch (e) { out.open2Err = String(e && e.message || e); send(out); return; }
+        var v = null;
+        for (var j = 0; j < 200; j++) {
+            var cand = document.querySelectorAll('.vv-player-video');
+            for (var k = 0; k < cand.length; k++) {
+                var c = cand[k];
+                if (document.contains(c) && c.closest && c.closest('#vv-player-root')) { v = c; break; }
+            }
+            if (v) break;
+            await wait(16);
+        }
+        if (!v) { out.err = '第二次打开没有拿到播放节点'; send(out); return; }
+        await wait(3200);                         // 回退前的表现：1.6s 后就自己关了
+        out.cur = +(+v.currentTime || 0).toFixed(2);
+        out.dur = +(v.duration || 0).toFixed(2);
+        out.active = !!(window.__vv.VV && window.__vv.VV.playerActive) ? 1 : 0;
+        out.paused = v.paused ? 1 : 0;
+        out.ok = (out.active === 1 && out.cur > 0.1 && out.cur < 4) ? 1 : 0;
+        send(out);
+        try { window.__vv.close(); } catch (e) {}
+    }
+
+    async function main() {
+        for (var i = 0; i < 100; i++) {
+            if (window.__vv && window.__vv.VV) break;
+            await wait(100);
+        }
+        var env = { tag: 'env' };
+        try {
+            env.version = (window.__vv && window.__vv.VV && window.__vv.VV.version) || 'n/a';
+            env.hasVv = !!(window.__vv && window.__vv.VV);
+            // 本页要量的是「播放本身」，页面自己的 video 不能被自动播放拦截按住
+            window.__vv.VV.cfg.pageAutoplay = true;
+            env.src = SRC;
+            env.vw = window.innerWidth; env.vh = window.innerHeight; env.dpr = window.devicePixelRatio;
+        } catch (e) { env.err = String(e && e.message || e); }
+        send(env);
+
+        if (Q.get('mode') === 'resume') { await resumePhase(); hud('完成'); send({ tag: 'done' }); return; }
+
+        for (var r = 0; r < ROUNDS; r++) {
+            if (r % 2 === 0) {
+                hud('第' + (r + 1) + '轮 · 原生先');
+                await armNative(r + 1);
+                hud('第' + (r + 1) + '轮 · 插件');
+                await armPlugin(r + 1);
+            } else {
+                hud('第' + (r + 1) + '轮 · 插件先');
+                await armPlugin(r + 1);
+                await wait(800);
+                hud('第' + (r + 1) + '轮 · 原生');
+                await armNative(r + 1);
+            }
+            await wait(900);
+        }
+        hud('完成');
+        send({ tag: 'done' });
+    }
+    main().catch(function (e) {
+        send({ tag: 'fatal', err: String(e && e.message || e) });
+        send({ tag: 'done' });
+    });
+})();
+</script>
+</body>
+</html>
