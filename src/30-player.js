@@ -1365,9 +1365,13 @@ function vvHlsConfig() {
         startFragPrefetch: true,
         testBandwidth: false,
         abrBandWidthUpFactor: 0.6,
-        // 点播不是直播，缓冲越深越抗抖：36s 目标（6s 分片约 6 片余量），
-        // 回看缓冲压到 20s，把内存让给前向缓冲。
-        backBufferLength: 20,
+        // 点播不是直播，缓冲越深越抗抖：36s 目标（6s 分片约 6 片余量）。
+        // 回看缓冲全留（Infinity，hls.js 默认值，与桌面播放器行为一致）：
+        // 跳远处再跳回任意已看位置直接命中缓冲，不重新下载。
+        // 已播数据是 SourceBuffer 里的压缩分片（≈ 码率 × 时长），1080P 一集最多
+        // 几百 MB —— 这是全留的固有代价，多实例并发的内存上限仍由
+        // maxBufferSize 预算与默认单实例模式兜底。
+        backBufferLength: Infinity,
         maxBufferLength: 36,
         maxMaxBufferLength: 72,
         maxBufferSize: 50 * 1000 * 1000,

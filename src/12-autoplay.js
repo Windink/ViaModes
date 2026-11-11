@@ -15,12 +15,18 @@
 // 「用户点过页面」的判定用 transient activation（navigator.userActivation.isActive）
 // 加上 1.2s 内有过 pointerdown/touchstart/click/keydown 的兜底窗口：站点自己的播放、
 // 续播、以及我们恢复页面媒体的链路都不受影响（后者还会用 vvApAllowNext 显式放行）。
+// 例外：内置播放器开着时，落在我们自己浮层上的手势不给站点视频放行——否则 m3u8
+// 页面加载慢时，站点播放器会在用户点开插件播放器后的手势窗内迟到起播，
+// 出现「原页面和插件一起播、一起拉分片」。
 //
 // 开关：更多菜单「网页视频自动播放」，配置项 pageAutoplay，默认 false = 拦截。
 
 var VV_AP = {
     origPlay: null,
     lastGesture: 0,
+    // 最后一次手势落在谁身上：true = 我们自己的浮层（角标/面板/播放器/分享/选集，
+    // 容器 id 都以 vv- 开头）。内置播放器开着时它决定 1.2s 手势窗要不要放行站点视频。
+    lastOnOurs: false,
     blocked: 0,
     hooked: false
 };
@@ -48,12 +54,30 @@ function vvApActivated() {
     return (Date.now() - VV_AP.lastGesture) < 1200;
 }
 
+// 手势落点是不是在我们自己的浮层上。角标/面板/播放器/分享/选集都挂在 <html> 下、
+// 容器 id 以 vv- 开头，用 closest 统一判；站点元素理论上也可能叫 vv-*，
+// 误伤代价只是"我们播放器开着时站点视频被多拦一次"，可接受。
+function vvApGestureOnOurs(e) {
+    try {
+        var t = e && e.target;
+        if (!t || !t.closest) return false;
+        return !!t.closest('[id^="vv-"]');
+    } catch (e1) { return false; }
+}
+
 function vvApShouldBlock(el) {
     if (!el) return false;
     if (vvApCfgOn()) return false;          // 配置里放开了自动播放
     if (!vvApIsVideo(el)) return false;     // 只治视频，不碰音频播放器
     if (vvApIsOurs(el)) return false;       // 内置播放器自己
     if (el.__vvApAllow) return false;       // 我们恢复页面媒体时的一次性放行
+    // 内置播放器开着时，点在我们 UI 上的手势不能顺带给站点视频放行：
+    // m3u8 页面加载慢，站点播放器常在用户点开插件播放器后的 1.2s 手势窗内才起播，
+    // 放行就是「原页面和插件播放器一起播、一起拉分片」。
+    // 点在页面本身（如小窗模式下点站点播放键）仍按普通手势放行。
+    try {
+        if (VV && VV.playerActive && VV_AP.lastOnOurs) return true;
+    } catch (eG) {}
     if (vvApActivated()) return false;      // 用户已经点过页面
     return true;
 }
@@ -138,9 +162,10 @@ function vvApInstall() {
         }, true);
     } catch (eEv) {}
 
-    // 3) 手势：记时间点，并把之前降级的 preload 还回去
-    var mark = function () {
+    // 3) 手势：记时间点和落点，并把之前降级的 preload 还回去
+    var mark = function (e) {
         VV_AP.lastGesture = Date.now();
+        VV_AP.lastOnOurs = vvApGestureOnOurs(e);
         vvApRestorePreload();
     };
     var types = ['pointerdown', 'touchstart', 'mousedown', 'click', 'keydown'];

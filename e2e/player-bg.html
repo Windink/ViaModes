@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>player-bg</title>
+<style>
+  body { margin: 0; background: #0b0b0f; color: #fff; font: 14px/1.6 monospace; padding: 8px; }
+  #stat { white-space: pre-wrap; word-break: break-all; color: #7ef; }
+</style>
+</head>
+<body>
+<div>内置播放器后台释放复现台（tap=1 后借真实手势开播放器）</div>
+<div id="stat">…</div>
+<!-- 走 /dist/vv-<数字>.js 别名，避开 WebView 按路径缓存 -->
+<script src="/dist/vv-914.js"></script>
+<script>
+(function () {
+  var q = new URLSearchParams(location.search);
+  var MODE = q.get('mode') || 'mp4';
+  var OPEN_AT = Number(q.get('openAt') || 0);   // 毫秒：>0 时等一次 click 再开（手势链路）
+  var GUEST_AT = Number(q.get('guestAt') || 0); // 毫秒：>0 时 window.open 一个 guest 页签
+  var MEDIA = MODE === 'hls'
+    ? '/e2e/media/hls/master.m3u8'
+    : '/e2e/media/bb720.mp4';
+
+  var lastKey = '';
+  function snap(tag) {
+    var V = (window.__vv && window.__vv.VV) || {};
+    var a = V.active || {};
+    var v = document.querySelector('.vv-player-video');
+    var rec = {
+      id: 'A', tag: tag, ts: Date.now(), ver: (window.__VV_DEBUG__ || {}).version || '',
+      pActive: !!V.playerActive,
+      bg: !!V._bg,
+      sus: !!a._suspended, rel: !!a._mediaReleased,
+      hls: a.hls ? 1 : 0,
+      paused: v ? !!v.paused : null,
+      t: v ? Math.round((v.currentTime || 0) * 10) / 10 : -1,
+      rs: v ? v.readyState : -1,
+      hid: !!document.hidden,
+      rafGap: V._rafLast ? (Date.now() - V._rafLast) : -1,
+      sweep: V._sweepCount || 0
+    };
+    var key = JSON.stringify([rec.bg, rec.sus, rec.rel, rec.hls, rec.paused, rec.t, rec.pActive, rec.rs]);
+    document.getElementById('stat').textContent = JSON.stringify(rec);
+    document.title = 'pbg ' + key.slice(1, 40);
+    if (key !== lastKey || tag !== 'tick') {
+      lastKey = key;
+      try { fetch('/__report', { method: 'POST', body: JSON.stringify(rec) }); } catch (e) {}
+    }
+  }
+  setInterval(function () { snap('tick'); }, 2000);
+
+  function openPlayer() {
+    try {
+      // openPlayer 只在 vvdebug 句柄上暴露（window.vvOpen 不存在）
+      window.__vv.open({ url: location.origin + MEDIA, type: MODE === 'hls' ? 'HLS' : 'MP4',
+        name: 'pbg', source: 'test' });
+      snap('open');
+    } catch (e) {
+      try { fetch('/__report', { method: 'POST', body: JSON.stringify({ id: 'A', tag: 'openErr', msg: String(e && e.message) }) }); } catch (e2) {}
+    }
+  }
+
+  if (OPEN_AT > 0) {
+    // MuMu 的 Via 拦无手势 play：等一次真实 click（驱动 input tap 触发）再开播放器
+    document.addEventListener('click', function () { setTimeout(openPlayer, 300); }, { once: true });
+  } else {
+    setTimeout(openPlayer, 1500);
+  }
+  if (GUEST_AT > 0) {
+    setTimeout(function () {
+      try { window.open('/e2e/mumu-tab.html?id=B&mode=mp4&vvdebug=1', '_blank'); } catch (e) {}
+    }, GUEST_AT);
+  }
+  setTimeout(function () { snap('boot'); }, 1200);
+})();
+</script>
+</body>
+</html>

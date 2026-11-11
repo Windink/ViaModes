@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<!-- 自动播放拦截真机测试台（MuMu + Via）。
+     场景：m3u8 页面加载慢，站点播放器在插件播放器打开之后才 attach src 并起播。
+     驱动手势用的是合成 click：拦截器记手势靠自家 window 捕获监听器（不校验 isTrusted），
+     对「落点在我们 UI / 落点在页面」的记账与真实点击一致；
+     navigator.userActivation 在合成事件下保持 false，反而让 1.2s 手势窗这条兜底路径
+     也必须走通，比真实点击覆盖得更严。
+     断言在页面内做，POST /__report 回本地服务，scripts/mumu-aplate.mjs 汇总。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aplate</title>
+<style>
+  body { margin: 0; font: 13px/1.6 sans-serif; background: #111; color: #eee; padding: 12px; }
+  button { font-size: 15px; padding: 8px 14px; }
+  #sitev { width: 240px; height: 135px; background: #000; display: block; margin: 10px 0; }
+</style>
+</head>
+<body>
+<h3>自动播放拦截真机测试台</h3>
+<!-- 嗅探诱饵：让角标出现，S1 才有点击目标 -->
+<a id="vidlink" href="/e2e/media/bb720.mp4">测试视频链接</a>
+<video id="sitev" muted playsinline preload="none"></video>
+<button id="pagebtn">页面自己的按钮</button>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) {
+    var p = kv.split('='); qs[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var SCEN = qs.scen || 'S1';
+  var RUN = qs.run || ('r' + Date.now());
+  var MEDIA = location.origin + '/e2e/media/bb720.mp4';
+  var pass = 0, fail = 0, errs = 0;
+
+  function send(row) {
+    row.run = RUN;
+    try { fetch('/__report', { method: 'POST', body: JSON.stringify(row) }); } catch (e) {}
+  }
+  function log(s) { document.getElementById('log').textContent += s + '\n'; }
+  function ok(name, cond, detail) {
+    if (cond) pass++; else fail++;
+    log((cond ? 'ok   - ' : 'FAIL - ') + name + (detail !== undefined ? '  [' + detail + ']' : ''));
+    send({ tag: 'ok', name: name, pass: !!cond, detail: String(detail === undefined ? '' : detail) });
+  }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+
+  function vv() { return window.__vv || null; }
+  function sitev() { return document.getElementById('sitev'); }
+  // 等角标出现。嗅探条目直接注入 VV.items（与 episodes 真机台同法），
+  // 不赌嗅探器对本页锚点的扫描时序； vvShowBadgeNew 要求 items 非空才肯亮。
+  async function waitBadge(ms) {
+    var deadline = Date.now() + (ms || 10000);
+    while (Date.now() < deadline) {
+      var b = document.getElementById('vv-badge');
+      if (b && b.classList.contains('show')) return b;
+      try {
+        var w = vv(), V = w && w.VV;
+        if (V && V.items && !V.items.length) {
+          V.items.push({ url: MEDIA, type: 'MP4', name: 'aplate', source: 'test' });
+        }
+        if (w && w.showBadgeNew) w.showBadgeNew();
+      } catch (e) {}
+      await wait(300);
+    }
+    return document.getElementById('vv-badge');
+  }
+  // 站点播放器的「迟到起播」：m3u8 慢加载站点常见的两步——先 attach src，再 play()
+  function siteStart() {
+    var v = sitev();
+    if (!v.getAttribute('src')) v.setAttribute('src', MEDIA);
+    v.play().then(function () { send({ tag: 'diag', phase: 'sitePlayResolved' }); })
+      .catch(function (e) { send({ tag: 'diag', phase: 'sitePlayRejected', msg: String(e && e.name) }); });
+  }
+
+  send({ tag: 'boot', scen: SCEN, href: location.pathname });
+
+  var scenarios = {
+    // S1 主场景（本次修复）：点我们的角标打开播放器（手势落在我们 UI 上），
+    // 站点视频在 1.2s 手势窗内迟到起播 → 必须被拦。
+    // 时序刻意压进手势窗：修复前 vvApActivated() 会放行、站点会真的播起来（有区分度）；
+    // 修复后 lastOnOurs 规则拦截。
+    S1: async function () {
+      var badge = await waitBadge();
+      if (!badge) { send({ tag: 'fatal', msg: 'badge 不存在' }); return; }
+      badge.click();                        // t0：手势落点 = 我们的 UI
+      var v = vv();
+      if (!v || !v.open) { send({ tag: 'fatal', msg: '__vv.open 不存在' }); return; }
+      await wait(150);
+      v.open({ url: MEDIA, name: 'aplate', type: 'MP4', source: 'test' });
+      await wait(450);
+      ok('播放器已打开', !!(v.VV && v.VV.playerActive), 'playerActive=' + (v.VV && v.VV.playerActive));
+      var pv = document.querySelector('.vv-player-root video');
+      ok('插件播放器在播', !!pv && pv.paused === false,
+        pv ? ('paused=' + pv.paused + ' t=' + pv.currentTime.toFixed(1)) : 'no player video');
+      siteStart();                          // t0+600ms，仍在手势窗内
+      await wait(1500);
+      var sv = sitev();
+      ok('站点视频被拦（未起播）', sv.paused === true, 'paused=' + sv.paused + ' t=' + sv.currentTime.toFixed(2));
+      ok('站点视频没有网络活动', sv.networkState !== 2 || sv.currentTime === 0,
+        'networkState=' + sv.networkState);
+      var pv2 = document.querySelector('.vv-player-root video');
+      ok('插件播放器仍在播', !!pv2 && pv2.paused === false,
+        pv2 ? ('paused=' + pv2.paused + ' t=' + pv2.currentTime.toFixed(1)) : 'no player video');
+      finish();
+    },
+    // S2 放行面：手势落在页面本身（模拟小窗模式下用户点站点播放键）→ 放行。
+    // 起播必须紧跟页面手势，否则超出 1.2s 手势窗会被基础规则拦，测不到放行分支。
+    S2: async function () {
+      await wait(800);
+      var v = vv();
+      if (!v || !v.open) { send({ tag: 'fatal', msg: '__vv.open 不存在' }); return; }
+      v.open({ url: MEDIA, name: 'aplate', type: 'MP4', source: 'test' });
+      await wait(1200);
+      document.getElementById('pagebtn').click();   // 手势落点 = 页面
+      siteStart();                                   // 紧跟手势
+      await wait(1500);
+      var sv = sitev();
+      ok('手势在页面：站点视频放行', sv.paused === false && sv.currentTime > 0,
+        'paused=' + sv.paused + ' t=' + sv.currentTime.toFixed(2));
+      finish();
+    },
+    // S3 回归：不开播放器，页面手势后站点自动起播照常放行（拦截器基础行为不变）
+    S3: async function () {
+      await wait(800);
+      document.getElementById('pagebtn').click();
+      await wait(300);
+      siteStart();
+      await wait(1500);
+      var sv = sitev();
+      ok('无播放器：站点视频正常起播', sv.paused === false && sv.currentTime > 0,
+        'paused=' + sv.paused + ' t=' + sv.currentTime.toFixed(2));
+      finish();
+    },
+    // S4 回归：播放器开着、无任何手势 → 站点视频被基础规则拦截（原有行为）
+    S4: async function () {
+      await wait(800);
+      var v = vv();
+      if (!v || !v.open) { send({ tag: 'fatal', msg: '__vv.open 不存在' }); return; }
+      v.open({ url: MEDIA, name: 'aplate', type: 'MP4', source: 'test' });
+      await wait(1200);
+      siteStart();                          // 无手势：基础规则就该拦
+      await wait(1500);
+      var sv = sitev();
+      ok('无手势：站点视频被拦', sv.paused === true, 'paused=' + sv.paused + ' t=' + sv.currentTime.toFixed(2));
+      finish();
+    }
+  };
+
+  function finish() {
+    send({ tag: 'done', scen: SCEN, pass: pass, fail: fail, errs: errs });
+    log('done: ' + pass + ' passed, ' + fail + ' failed');
+  }
+
+  window.addEventListener('error', function (e) {
+    errs++; send({ tag: 'diag', phase: 'pageErr', msg: String(e.message || e) });
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { scenarios[SCEN](); });
+  } else {
+    scenarios[SCEN]();
+  }
+})();
+</script>
+</body>
+</html>

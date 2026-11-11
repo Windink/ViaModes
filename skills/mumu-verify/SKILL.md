@@ -75,6 +75,7 @@ git checkout -- e2e/bench-mp4.png e2e/bench-hls.png e2e/load-pct.png e2e/load-in
 
 | 改动面 | 套件 | 为什么必须是真机 |
 | --- | --- | --- |
+| 自动播放拦截 / 手势窗 | `mumu-aplate` | 手势记账与 1.2s 窗口只有真实 WebView 的点击链路能验；放行分支要求起播紧跟手势，桌面测不准时序 |
 | 选集识别 / 网格 / 切集 | `mumu-episodes` | 真实视口 360×520 下的浮层点击链路、`elementFromPoint` 命中 |
 | 页内小窗 / 导出浮层 / 置顶巡检 | `mumu-pip-share` | WebView 110 不支持系统画中画，只能验降级路径；2.5s 巡检要真实点击才复现 |
 | 画质档位 / ABR / 不封顶 | `mumu-quality` | 真机 hls 实例的 `autoLevelCapping` 与配置对象只有运行时能读 |

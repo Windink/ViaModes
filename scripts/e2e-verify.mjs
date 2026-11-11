@@ -129,7 +129,8 @@ try {
         return {
             maxBufferLength: c.maxBufferLength,
             maxMaxBufferLength: c.maxMaxBufferLength,
-            backBufferLength: c.backBufferLength,
+            // Infinity 过 JSON 序列化会变 null，这里显式转成标记串再比对
+            backBufferLength: c.backBufferLength === Infinity ? 'inf' : c.backBufferLength,
             maxBufferSize: c.maxBufferSize,
             abrEwmaDefaultEstimate: c.abrEwmaDefaultEstimate,
             ttf: c.fragLoadPolicy.default.maxTimeToFirstByteMs,
@@ -138,7 +139,7 @@ try {
     });
     ok('缓冲目标 36s', cfg.maxBufferLength === 36, String(cfg.maxBufferLength));
     ok('缓冲上限 72s', cfg.maxMaxBufferLength === 72, String(cfg.maxMaxBufferLength));
-    ok('回看缓冲 20s', cfg.backBufferLength === 20, String(cfg.backBufferLength));
+    ok('回看缓冲全留', cfg.backBufferLength === 'inf', String(cfg.backBufferLength));
     ok('缓冲字节上限 50MB', cfg.maxBufferSize === 50000000, String(cfg.maxBufferSize));
     ok('带初始计 2Mbps', cfg.abrEwmaDefaultEstimate === 2000000, String(cfg.abrEwmaDefaultEstimate));
     ok('播放态分片超时 10s', cfg.ttf === 10000, String(cfg.ttf));
@@ -218,7 +219,7 @@ try {
         v.addEventListener('seeking', onSeeking);
         const before = v.currentTime;
         setTimeout(() => {
-            // 回跳 3s：落在已缓冲区间（backBufferLength=20s），seeked/playing 会立刻到来，
+            // 回跳 3s：落在已缓冲区间（backBufferLength 全留），seeked/playing 会立刻到来，
             // 断言因此确定；远端慢速跳转由「慢网远程 seek」用例单独覆盖
             v.currentTime = Math.max(before - 3, 0.5);
         }, 30);

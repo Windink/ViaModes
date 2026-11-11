@@ -113,6 +113,19 @@
   // 不做周期同步：周期同步会把我们"临时静音"又覆盖掉，反而看不出究竟是谁还原的。
   if (SOUND) setTimeout(function () { try { v.muted = false; } catch (e) {} }, 3000);
   try { v.play().catch(function () {}); } catch (e) {}
+  // tap=1：MuMu 的 WebView/Via 拦无手势起播（muted autoplay 也不放行），驱动用
+  // `input tap` 点一下屏幕，click 处理器里的 play() 属于真实手势链路，不会被拦。
+  // 顺手把 play 被拒的原因报上来，省得"没播起来"和"没判后台"混在一起分不清。
+  if (q.get('tap') === '1') {
+    document.addEventListener('click', function () {
+      try {
+        var p = v.play();
+        if (p && p.catch) p.catch(function (e) {
+          try { fetch('/__report', { method: 'POST', body: JSON.stringify({ id: ID, tag: 'playErr', name: e && e.name, msg: String(e && e.message).slice(0, 90) }) }); } catch (e2) {}
+        });
+      } catch (e) {}
+    }, { once: true });
+  }
 
   // 200ms 采样 src 有无，统计"被拆掉又自己装回来"的次数。
   setInterval(function () {

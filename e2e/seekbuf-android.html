@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>回看缓冲 · Via 真机验证</title>
+<style>
+  body { font: 13px/1.55 system-ui, sans-serif; margin: 10px 12px 90px; color: #222; background: #f5f5f7; }
+  h1 { font-size: 16px; margin: 0 0 4px; }
+  p { font-size: 11px; color: #777; margin: 0 0 10px; }
+  #hud { position: fixed; left: 0; right: 0; top: 0; z-index: 2147483647; pointer-events: none;
+      background: rgba(0,0,0,.82); color: #9fe870; font: 10px/1.45 ui-monospace, monospace;
+      padding: 5px 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<div id="hud">等待脚本注入…</div>
+<h1>回看缓冲（Via 真机）</h1>
+<p>600s 本地 HLS（seg0/seg1 加 discontinuity 拼接）。流程：播到 14s → 跳到 480s → 缓冲稳定后
+   跳回 8s。判「跳远回跳不重新下载」：回跳目标 8s 必须仍在 video.buffered 里、
+   hlsFragLoaded 计数不涨、回跳后 1 秒内恢复走秒。页面自动执行并上报。</p>
+
+<script>
+(function () {
+    'use strict';
+    var hud = document.getElementById('hud');
+    var RUN = (/seekbuf-android-([A-Za-z0-9._-]+)\.html/.exec(location.pathname) || [])[1] || '';
+
+    function send(o) {
+        o.run = RUN; o.t = Date.now();
+        try { fetch('/__report', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+    }
+    function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function hudText(s) { hud.textContent = s; send({ tag: 'phase', name: s }); }
+    function ok(name, pass, detail) { send({ tag: 'ok', name: name, pass: !!pass, detail: detail }); }
+
+    function vv() { return window.__vv || null; }
+    function pv() { var v = document.querySelector('.vv-player-root video'); return v || null; }
+    function ranges(v) {
+        var out = [];
+        try {
+            for (var i = 0; i < v.buffered.length; i++)
+                out.push([Math.round(v.buffered.start(i) * 10) / 10, Math.round(v.buffered.end(i) * 10) / 10]);
+        } catch (e) {}
+        return out;
+    }
+    function inBuffered(v, t) {
+        try {
+            for (var i = 0; i < v.buffered.length; i++)
+                if (v.buffered.start(i) <= t && t < v.buffered.end(i)) return true;
+        } catch (e) {}
+        return false;
+    }
+
+    var fragN = 0;
+    var fragStarts = [];
+    function hookFrag() {
+        try {
+            var h = vv() && vv().VV && vv().VV.active && vv().VV.active.hls;
+            if (h && h.on) {
+                h.on('hlsFragLoaded', function (ev, data) {
+                    fragN++;
+                    try { fragStarts.push(data && data.frag ? data.frag.start : -1); } catch (e) {}
+                });
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function fatal(msg) { send({ tag: 'fatal', msg: msg }); hudText('FATAL ' + msg); }
+
+    async function main() {
+        // 等插件注入
+        var deadline = Date.now() + 15000;
+        while (!vv() && Date.now() < deadline) await wait(300);
+        if (!vv()) { fatal('脚本没注入'); return; }
+        send({ tag: 'env', version: (vv().VV && vv().VV.version) || '', ua: navigator.userAgent,
+            vw: innerWidth, vh: innerHeight });
+
+        // 合成手势（拦截器与自动播放记账都认自家监听器，aplate 台已验证可行）
+        try { document.body.click(); } catch (e) {}
+        await wait(300);
+        var media = location.origin + '/.tmp/hls-gen/' +
+            (/\?(?:.*&)?list=([A-Za-z0-9._-]+)/.exec(location.search) || [])[1] + '.m3u8?r=' + RUN;
+        vv().open({ url: media, name: 'seekbuf', type: 'HLS', source: 'test' });
+
+        // 等播放器视频出现并起播
+        hudText('等起播');
+        var t0 = Date.now(), v = null;
+        while (Date.now() - t0 < 40000) {
+            v = pv();
+            if (v && !v.paused && v.currentTime > 0.5 && v.duration > 100) break;
+            await wait(400);
+        }
+        if (!v || v.duration < 100) { fatal('播放器没起播或时长不对 dur=' + (v ? v.duration : -1)); return; }
+        ok('播放器起播，时长 ~600s', v.duration > 560, 'dur=' + v.duration.toFixed(1));
+        hookFrag();
+
+        // 归一化起点：续播记忆按 host+path 做 key（query 无关），上一轮可能从任意位置起播，
+        // 这里显式回到 8s 再播到 14s，保证「已看区间」语义成立
+        try { v.currentTime = 8; } catch (eS) {}
+        while (Date.now() - t0 < 90000 && (v.currentTime < 14 || v.paused || v.seeking)) await wait(400);
+        var fragN0 = fragN, buf0 = ranges(v);
+        ok('已播 14s（从 8s 起播）', v.currentTime >= 13.5 && !v.paused,
+            't=' + v.currentTime.toFixed(1) + ' fragN=' + fragN0);
+        send({ tag: 'snap', name: 'buf0', ranges: buf0, fragN: fragN0, t: +v.currentTime.toFixed(2) });
+
+        // 跳到 480s
+        hudText('跳 480s');
+        try { v.currentTime = 480; } catch (e) { fatal('seek 失败 ' + e); return; }
+        while (Date.now() - t0 < 90000 && (v.currentTime < 478 || v.paused || v.seeking)) await wait(400);
+        await wait(4000); // 让前向缓冲铺满，回看裁剪在此期间发生
+        var fragN1 = fragN, buf1 = ranges(v);
+        ok('跳到 480s 且在播', v.currentTime >= 478 && !v.paused,
+            't=' + v.currentTime.toFixed(1) + ' fragN=' + fragN1 + ' paused=' + v.paused);
+        send({ tag: 'memphase', name: 'after-far-seek', ranges: buf1, fragN: fragN1,
+            t: +v.currentTime.toFixed(2), duration: +v.duration.toFixed(1) });
+
+        // 回跳 8s 前的关键快照：8s 还在不在 buffered 里
+        var has8 = inBuffered(v, 8);
+        var fragN2 = fragN, starts2 = fragStarts.length;
+        ok('回跳目标 8s 仍在缓冲里（不重下的前提）', has8, 'ranges=' + JSON.stringify(buf1));
+
+        hudText('回跳 8s');
+        try { v.currentTime = 8; } catch (e2) { fatal('回跳失败 ' + e2); return; }
+        var tSeekBack = Date.now();
+        await wait(4000);
+        var fragN3 = fragN, dt = +v.currentTime.toFixed(2);
+        var resumedOk = Date.now() - tSeekBack <= 4500 && dt > 8.2 && !v.paused;
+        ok('回跳后立即续播（无重新缓冲）', resumedOk, 't=' + dt + ' paused=' + v.paused);
+        // 判「不重下」看已看区间：回跳目标（8s）之前开始的分片不允许重新请求。
+        // 新位置之后的前向补缓冲（start >= 8）是正常行为，不判负。
+        var reDl = 0;
+        for (var fi = starts2; fi < fragStarts.length; fi++)
+            if (fragStarts[fi] >= 0 && fragStarts[fi] < 7.5) reDl++;
+        ok('已看区间没有重新下载（回跳目标前无新分片）', reDl === 0,
+            '新增分片 ' + (fragStarts.length - starts2) + ' 个，其中落在已看区间的 ' + reDl +
+            ' 个；fragN ' + fragN2 + ' → ' + fragN3);
+        send({ tag: 'snap', name: 'after-back', ranges: ranges(v), fragN: fragN3, t: dt,
+            newStarts: fragStarts.slice(starts2) });
+        send({ tag: 'memphase', name: 'after-back', ranges: ranges(v), fragN: fragN3, t: dt });
+
+        var pass = has8 && reDl === 0 && resumedOk;
+        send({ tag: 'done', pass: pass });
+        hudText(pass ? 'ALL PASS' : 'FAIL（详见 report.log）');
+    }
+
+    main().catch(function (e) { fatal('异常 ' + (e && e.message)); });
+})();
+</script>
+</body>
+</html>

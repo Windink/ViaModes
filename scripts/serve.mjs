@@ -82,6 +82,11 @@ http.createServer(async (req, res) => {
     if (/^\/e2e\/abr-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/abr-android.html';
     if (/^\/e2e\/open-ab-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-android.html';
     if (/^\/e2e\/open-ab-hls-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/open-ab-hls-android.html';
+    // 内置播放器后台释放复现台同理
+    if (/^\/e2e\/player-bg-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/player-bg.html';
+    if (/^\/e2e\/aplate-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/aplate-android.html';
+    // 回看缓冲真机测试台同理
+    if (/^\/e2e\/seekbuf-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/seekbuf-android.html';
     // HLS 对照页的「网页臂」必须用插件内联的同一份 hls.js（light 构建），
     // 否则比的是 hls.js 两个构建的差异，不是播放器本身的差异。
     if (/^\/e2e\/vendor\/hls-light(?:-[A-Za-z0-9._-]+)?\.js$/.test(pathname)) pathname = '/vendor/hls.light.min.js';
