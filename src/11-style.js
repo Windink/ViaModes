@@ -433,7 +433,13 @@ html.vv-pagefs-on .vv-pagefs-video { position: fixed !important; left: 0 !import
 html.vv-pagefs-on .vv-pagefs-anc { transform: none !important; -webkit-transform: none !important;
   filter: none !important; -webkit-filter: none !important; perspective: none !important;
   will-change: auto !important; contain: none !important;
-  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important;
+  opacity: 1 !important; isolation: auto !important; mix-blend-mode: normal !important; }
+/* 站点常给播放器外层设 z-index（央视网是 position:relative;z-index:2 的 video_box），
+   这会新建层叠上下文，把 video 自己的 2147483001 锁在里面；黑底遮罩挂在 <html> 下、
+   在根上下文里是 2147483000，于是整块视频被盖住，表现就是「开了铺满一片黑」。
+   铺满期间把这些祖先整体抬到遮罩之上，仍低于角标 / 退出按钮的 2147483647。 */
+html.vv-pagefs-on .vv-pagefs-front-anc { z-index: 2147483002 !important; }
 /* 放在右上：Via 的底部状态栏/工具栏在网页之外，右上角永远不会被它压住。 */
 .vv-pagefs-exit { display: flex !important; align-items: center !important; justify-content: center !important;
   position: fixed !important; right: 12px !important; top: calc(env(safe-area-inset-top, 0px) + 12px) !important;

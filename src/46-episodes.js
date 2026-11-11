@@ -40,13 +40,36 @@ function vvEpNum(text) {
     return (n >= 0 && n <= 9999) ? n : null;
 }
 
-// URL 模板：path 里的数字统一换成 #，query 只保留键名（token / 时间戳的值每次都不同）。
+// URL 模板：把「会随集变化的数字」归一成 #，query 只保留键名（token / 时间戳的值每次都不同）。
 // /play/1.html?t=111 与 /play/2.html?t=222 → 同一模板；
 // /play/1.html 与 /detail/1.html → 不同模板，不会被混成一部剧。
+//
+// 不能对整条 path 直接 replace(/\d+/g,'#')：真实站点常用随机 ID 当播放页地址，
+// 央视网就是 /2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml 这种，
+// 每集 VID 里数字的位置和个数都不同，逐位替换会把同一部剧的 31 集拆成 31 个模板，
+// 每组只剩 1 条、全被丢掉，选集列表直接空白。所以按路径段处理：
+//   · 纯数字段（年份 / 集数 / 分页）→ #
+//   · 短的字母数字段（ep1.mp4 / seg3.ts）→ 数字换 #，保留名字
+//   · 长的字母数字混合段整体当成一条 ID → 「字母前缀 + #id + 扩展名」
+//     前缀保留下来是为了让同一站点里不同剧的 ID 前缀仍有区分度。
 function vvEpTemplate(u) {
     var s = String(u || '').split('#')[0];
     var q = s.indexOf('?');
-    var path = (q >= 0 ? s.slice(0, q) : s).replace(/\d+/g, '#');
+    var segs = (q >= 0 ? s.slice(0, q) : s).split('/');
+    for (var i = 0; i < segs.length; i++) {
+        var seg = segs[i];
+        if (!seg) continue;
+        if (/^\d{1,4}$/.test(seg)) { segs[i] = '#'; continue; }
+        if (!/\d/.test(seg) || !/[a-z]/i.test(seg)) continue;
+        var ext = /\.[a-z0-9]{2,5}$/i.exec(seg);
+        if (seg.length >= 8) {
+            var lead = /^[a-z]{2,4}/i.exec(seg);
+            segs[i] = (lead ? lead[0] : '') + '#id' + (ext ? ext[0] : '');
+        } else {
+            segs[i] = seg.replace(/\d+/g, '#');
+        }
+    }
+    var path = segs.join('/');
     if (q < 0) return path;
     var keys = [];
     var parts = s.slice(q + 1).split('&');
@@ -211,6 +234,45 @@ function vvEpCollectMedia() {
     return best.slice(0, VV_EP_MAX_CELLS);
 }
 
+// 站点给「当前集」加的选中态：优先信 DOM，比从 URL 里猜数字可靠。
+// 选中态可能挂在 <a> 自己，也可能挂在外层 <li>，两级都看。
+function vvEpIsCurrentEl(el) {
+    var RX = /(?:^|[\s_-])(?:on|cur|current|active|selected|now|playing)(?:$|[\s_-])/i;
+    try {
+        if (el.getAttribute && /^(?:page|true)$/i.test(el.getAttribute('aria-current') || '')) return true;
+    } catch (e0) {}
+    for (var k = 0, p = el; k < 2 && p; k++) {
+        try {
+            var c = p.className;
+            if (c && typeof c === 'object' && c.baseVal !== undefined) c = c.baseVal;
+            if (RX.test(String(c || ''))) return true;
+        } catch (e1) {}
+        try { p = p.parentNode; } catch (e2) { break; }
+    }
+    return false;
+}
+
+// 集号必须在这组候选里恰好出现一次才采信，避免把年份 / 播放量当集数。
+function vvEpNumInCands(n, page) {
+    if (n === null || n < 0 || n > 999) return -1;
+    var hit = 0;
+    for (var i = 0; i < page.length; i++) if (page[i].num === n) hit++;
+    return hit === 1 ? n : -1;
+}
+
+// URL 里的数字只是最后兜底，而且必须长得像集号：/play/3.html、?ep=3、#ep=3。
+// 不能再拿整条 URL 的「最后一个数字」当集号——路径里的 /e2e/、CDN 主机名、
+// 重定向后随机 ID 里的数字都会命中，真机上表现为「高亮永远停在第 2 集」。
+function vvEpNumFromUrl(page) {
+    var s = location.href;
+    var m = /(?:[?&#])(?:ep|p|num|play|episode)[=:_-]?(\d{1,3})(?=$|[&#])/i.exec(s);
+    if (!m) {
+        var last = s.split('#')[0].split('?')[0].split('/').pop() || '';
+        m = /^(\d{1,3})(?:\.[a-z0-9]{2,5})?$/i.exec(last);
+    }
+    return m ? vvEpNumInCands(parseInt(m[1], 10), page) : -1;
+}
+
 function vvEpCurrent(page, media) {
     var hereFull = location.href;
     var here = hereFull.split('#')[0];
@@ -224,16 +286,21 @@ function vvEpCurrent(page, media) {
             if (page[i].href && page[i].href.split('#')[0] === here) { res.page = page[i].num; break; }
         }
     }
-    // 当前页 URL 里的数字常常就是集数（/play/3.html）；只在候选里唯一时采信
+    // 跨页面选集常见：每集一个随机 ID 地址，还会重定向，URL 里根本没有集号。
+    // 这时站点 DOM 上的选中态、以及标题里的「第 N 集」才是唯一可靠信号。
     if (res.page < 0) {
-        var mi = null;
-        try { mi = vvNumInfo(location.href); } catch (e) {}
-        if (mi && mi.num <= 999) {
-            var hit = 0;
-            for (var j = 0; j < page.length; j++) if (page[j].num === mi.num) hit++;
-            if (hit === 1) res.page = mi.num;
+        for (var a = 0; a < page.length; a++) {
+            if (vvEpIsCurrentEl(page[a].el)) { res.page = page[a].num; break; }
         }
     }
+    if (res.page < 0) {
+        // 「第 7 集」和「第7集」都要认，标题里有没有空格全看站点
+        var tm = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回|部)/i.exec(document.title || '');
+        if (tm) res.page = vvEpNumInCands(parseInt(tm[1], 10), page);
+    }
+    // URL 里的数字只是最后兜底，随机 ID / 重定向页面上它纯属噪声，
+    // 所以排在 DOM 和标题之后，且只认明确像集号的那几个位置。
+    if (res.page < 0) res.page = vvEpNumFromUrl(page);
     try {
         var cur = VV.active && VV.active.item ? VV.active.item.url : '';
         for (var k = 0; k < media.length; k++) if (media[k].item.url === cur) { res.media = media[k].num; break; }

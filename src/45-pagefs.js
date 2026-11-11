@@ -52,7 +52,9 @@ var VV_PAGEFS_INNER_CSS =
     '.vv-pagefs-inner-anc{transform:none!important;-webkit-transform:none!important;' +
     'filter:none!important;-webkit-filter:none!important;perspective:none!important;' +
     'will-change:auto!important;contain:none!important;' +
-    'backdrop-filter:none!important;-webkit-backdrop-filter:none!important}' +
+    'backdrop-filter:none!important;-webkit-backdrop-filter:none!important;' +
+    'opacity:1!important;isolation:auto!important;mix-blend-mode:normal!important}' +
+    '.vv-pagefs-inner-front-anc{z-index:2147483002!important}' +
     '.vv-pagefs-inner-video{position:fixed!important;left:0!important;top:0!important;' +
     'width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;' +
     'min-width:0!important;min-height:0!important;margin:0!important;padding:0!important;' +
@@ -335,19 +337,35 @@ function vvPageFsAncestors(v) {
         try {
             var cs = win.getComputedStyle ? win.getComputedStyle(p) : null;
             if (cs) {
+                var needClear = false;
                 for (var i = 0; i < VV_PAGEFS_ANC_PROPS.length; i++) {
                     var k = VV_PAGEFS_ANC_PROPS[i];
                     var val = '';
                     try { val = cs.getPropertyValue ? cs.getPropertyValue(k) : (cs[k] || ''); } catch (eV) {}
                     val = String(val || '').trim();
                     if (val && val !== 'none' && val !== 'auto' && val !== 'normal' && val !== '0s') {
-                        // 两个类一起挂：外层文档里只有 .vv-pagefs-anc 生效，
-                        // shadow root / iframe 内部只有 .vv-pagefs-inner-anc 生效。
-                        p.classList.add('vv-pagefs-anc');
-                        p.classList.add('vv-pagefs-inner-anc');
-                        hit.push(p);
-                        break;
+                        needClear = true; break;
                     }
+                }
+                // positioned 且 z-index 非 auto 会新建层叠上下文：video 自己再高的 z-index
+                // 也出不了这个祖先，而黑底遮罩在根上下文里 → 整块视频被盖住（真机全黑）。
+                // 央视网的播放器外层就是 position:relative;z-index:2 的 video_box。
+                var stacked = false;
+                try {
+                    var pos = String(cs.position || 'static');
+                    var zi = String(cs.zIndex || 'auto');
+                    stacked = (pos !== 'static' && zi !== 'auto' && zi !== '');
+                } catch (eZ) {}
+                if (needClear || stacked) {
+                    // 两个类一起挂：外层文档里只有 .vv-pagefs-anc 生效，
+                    // shadow root / iframe 内部只有 .vv-pagefs-inner-anc 生效。
+                    p.classList.add('vv-pagefs-anc');
+                    p.classList.add('vv-pagefs-inner-anc');
+                    if (stacked) {
+                        p.classList.add('vv-pagefs-front-anc');
+                        p.classList.add('vv-pagefs-inner-front-anc');
+                    }
+                    hit.push(p);
                 }
             }
         } catch (e1) {}
@@ -419,6 +437,8 @@ function vvPageFsInnerDetach() {
     for (var i = 0; i < anc.length; i++) {
         try { anc[i].classList.remove('vv-pagefs-anc'); } catch (e2) {}
         try { anc[i].classList.remove('vv-pagefs-inner-anc'); } catch (e3) {}
+        try { anc[i].classList.remove('vv-pagefs-front-anc'); } catch (e4) {}
+        try { anc[i].classList.remove('vv-pagefs-inner-front-anc'); } catch (e5) {}
     }
     try { if (inner.style && inner.style.parentNode) inner.style.parentNode.removeChild(inner.style); } catch (e4) {}
 }
@@ -520,10 +540,12 @@ function vvPageFsDetach() {
     try { if (st.target) st.target.classList.remove('vv-pagefs-video'); } catch (e1) {}
     var anc = st.anc || [];
     for (var i = 0; i < anc.length; i++) {
-        // 祖先同时挂了两个类（外层 / 内层作用域各一个），退出必须都摘掉，
+        // 祖先同时挂了四个类（外层 / 内层作用域各两个），退出必须都摘掉，
         // 否则 class 里会留下 vv-pagefs-inner-anc 这种无用残留。
         try { anc[i].classList.remove('vv-pagefs-anc'); } catch (e2) {}
         try { anc[i].classList.remove('vv-pagefs-inner-anc'); } catch (e3) {}
+        try { anc[i].classList.remove('vv-pagefs-front-anc'); } catch (e4) {}
+        try { anc[i].classList.remove('vv-pagefs-inner-front-anc'); } catch (e5) {}
     }
     vvPageFsInnerDetach();
     st.video = null;

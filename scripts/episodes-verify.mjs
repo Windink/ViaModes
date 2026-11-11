@@ -73,6 +73,51 @@ try {
     ok('诊断报出模板分组与最终集数', scan.diag.topGroups.length > 0 && scan.diag.page === 24,
         '组 ' + scan.diag.topGroups.length + ' / 集 ' + scan.diag.page);
 
+    // ---- 跨页面选集：真实站点常用随机 ID 当每集的地址 ----
+    // 央视网点播页是 /2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml 这类，
+    // 每集 VID 里的数字位置都不同；以前逐位换 # 会把 31 集拆成 31 个模板、列表全空。
+    const tpl = await page.evaluate(() => {
+        const t = window.__vv.epTemplate;
+        return {
+            cctv: [
+                'https://tv.cctv.com/2020/05/28/VIDE30h8zPNlq5WoButIy45J200528.shtml',
+                'https://tv.cctv.com/2020/05/28/VIDEhhvmbvGp92hWMGJPijcc200528.shtml',
+                'https://tv.cctv.com/2020/05/29/VIDEE44yTnpB0bFb6xMsnkPk200529.shtml'
+            ].map(t),
+            pageSame: t('https://a.com/play/1.html?t=111') === t('https://a.com/play/2.html?t=222'),
+            pathDiff: t('https://a.com/play/1.html') !== t('https://a.com/detail/1.html'),
+            mediaSame: t('https://a.com/hls/seg1.ts') === t('https://a.com/hls/seg2.ts')
+        };
+    });
+    ok('随机 VID 型跨页地址归为同一选集模板', new Set(tpl.cctv).size === 1, tpl.cctv.join(' | '));
+    ok('普通数字分页模板仍保持一致', tpl.pageSame);
+    ok('不同路径的模板仍能区分', tpl.pathDiff);
+    ok('媒体直链分片模板仍保持一致', tpl.mediaSame);
+
+    // URL 不带集号时，页面标题「第 N 集」应能顶上（跨页跳转后常见）。
+    // 只临时加一个 query 让 URL 与候选链接都不匹配，hash 保持不动，
+    // 测完把 title / URL / 扫描缓存全部还原，后面的切集断言还要用 #ep=3。
+    const curProbe = await page.evaluate(() => {
+        const oldTitle = document.title, oldUrl = location.href;
+        const read = (title) => {
+            let d = -99;
+            try {
+                document.title = title;
+                history.replaceState(null, '', oldUrl.replace('?vvdebug=1', '?vvdebug=1&from=cctv'));
+                d = window.__vv.epScan(true).current.page;
+            } catch (e) {}
+            return d;
+        };
+        const byTitle = read('《跨页测试》 第 7 集');
+        const byUrl = read('跨页测试 · 标题里没有集号');
+        document.title = oldTitle;
+        history.replaceState(null, '', oldUrl);
+        try { window.__vv.epScan(true); } catch (e2) {}
+        return { byTitle: byTitle, byUrl: byUrl };
+    });
+    ok('URL 无集号时能从标题认出当前集', curProbe.byTitle === 7, String(curProbe.byTitle));
+    ok('URL 兜底不再把路径里的无关数字当集号', curProbe.byUrl === 3, String(curProbe.byUrl));
+
     // ---- 播放器顶栏一级入口 ----
     await page.evaluate(() => {
         window.__vv.open({ url: location.origin + '/e2e/flower.mp4', name: 'probe', type: 'MP4' });

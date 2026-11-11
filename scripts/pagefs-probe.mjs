@@ -74,11 +74,26 @@ try {
             return v;
         };
 
-        // 找出「谁盖在视口中心」
+        // 找出「谁盖在视口中心」。遮罩平时是 pointer-events:none，
+        // 直接 elementFromPoint 会穿透它、命中下面的 VIDEO，测出来的永远是「没盖住」，
+        // 但绘制层级上遮罩可能实实在在压着视频（真机表现为开了铺满一片黑）。
+        // 所以测量时临时让它参与命中测试，测完立刻还原，不改产品样式。
         const coverAt = () => {
-            const el = document.elementFromPoint(Math.round(VW / 2), Math.round(VH / 2));
-            while (el && el.shadowRoot && el.shadowRoot.elementFromPoint) break;
-            return el ? (el.tagName + (el.className ? '.' + String(el.className).split(/\s+/)[0] : '')) : 'null';
+            const shade = document.getElementById('vv-pagefs-shade');
+            let old = '';
+            try {
+                if (shade) {
+                    old = shade.style.pointerEvents || '';
+                    shade.style.setProperty('pointer-events', 'auto', 'important');
+                }
+                const el = document.elementFromPoint(Math.round(VW / 2), Math.round(VH / 2));
+                return el ? (el.tagName + (el.className ? '.' + String(el.className).split(/\s+/)[0] : '')) : 'null';
+            } finally {
+                if (shade) {
+                    if (old) shade.style.setProperty('pointer-events', old);
+                    else shade.style.removeProperty('pointer-events');
+                }
+            }
         };
 
         // 最近的「层叠上下文」祖先：它的 z-index 就是 video 能画到的最上层边界
@@ -121,6 +136,7 @@ try {
                     res.stack = stackOf(v);
                     res.shade = st.shade;
                     res.cover = coverAt();
+                    res.ancFrontZ = v.parentNode ? getComputedStyle(v.parentNode).zIndex : '';
                     res.videoTop = Math.round(r.top) + ',' + Math.round(r.left);
                 }
             } catch (e) {
@@ -292,6 +308,10 @@ try {
         }
         ok(`[${r.name}] 选中视频并 fixed 铺满`, full(r), `${r.pos} ${r.w}x${r.h} / ${vw}x${vh}`);
         ok(`[${r.name}] 遮罩没盖住视频`, !covered(r), '中心处最上层=' + r.cover);
+        if (r.name === 'stacking-z1') {
+            ok('低 z-index 播放器外层被抬到遮罩之上', r.ancFrontZ === '2147483002',
+                '祖先 z=' + r.ancFrontZ + ' / 遮罩 z=2147483000');
+        }
         // 祖先上两个作用域类（外层 / shadow、iframe 内层）退出后都不该有残留
         ok(`[${r.name}] 退出后祖先 class 零残留`, !/vv-pagefs/.test(String(r.ancAfter || '')),
             '祖先 class="' + (r.ancAfter || '') + '"');
