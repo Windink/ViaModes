@@ -85,6 +85,11 @@ try {
     await page.waitForFunction(() => !!(window.__vv && window.__vv.VV), { timeout: 15000 });
     ok('调试句柄挂载', true);
 
+    // OPFS 播放缓存（v0.1.105+）会把上一轮跑过的测试流分片留在磁盘上（同一台
+    // 机器跨浏览器进程也命中），慢网/诊断段的断言要的是真实网络行为，
+    // 每轮开头清一次缓存，从零开始测。顺带覆盖 cacheClear 的回归。
+    await page.evaluate(() => window.__vv.cacheClear());
+
     const hlsReady = await page.evaluate(() => !!(window.Hls && Hls.isSupported()));
     ok('hls.js 可用（内联或 CDN）', hlsReady);
     if (!hlsReady) throw new Error('hls.js 不可用，无法继续');
@@ -281,7 +286,15 @@ try {
 
     // ---- 诊断面板输出判定 ----
     const diag = await page.evaluate(() => window.__vv.diag());
-    ok('诊断输出下载速率与负载', /速率: 下载 [\d.]+KB\/s  需要 [\d.]+KB\/s  负载 \d+%/.test(diag));
+    const rateLine = diag.split('\n').find((l) => l.includes('速率')) || '';
+    const fragSum = await page.evaluate(() => {
+        try {
+            const a = window.__vv.VV.active;
+            return { ms: a._fragMsSum || 0, b: a._fragBytesSum || 0, ms1: a._fragMs || 0, b1: a._fragBytes || 0 };
+        } catch (e) { return null; }
+    });
+    ok('诊断输出下载速率与负载', /速率: 下载 [\d.]+KB\/s  需要 [\d.]+KB\/s  负载 \d+%/.test(diag),
+        (rateLine || 'diag 无速率行') + '  fragSum=' + JSON.stringify(fragSum));
     ok('诊断给出判定结论', /判定:/.test(diag), (diag.split('\n').find((l) => l.includes('判定:')) || '').slice(0, 70));
 
     // ---- 外链导出自检：本地起一个"必须带 Referer"的端点 ----

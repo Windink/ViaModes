@@ -1354,6 +1354,9 @@ function vvHlsConfig() {
     return {
         enableWorker: true,
         lowLatencyMode: false,
+        // 媒体分片走 OPFS 缓存 loader（13-opfs.js）：命中缓存的分片不发网络请求。
+        // 只接 fragment（清单/加密 key 走默认 loader），缓存失败自动回落网络加载。
+        fLoader: vvOpfsFragLoader,
         // 不按播放器 DOM 尺寸封顶：手机 WebView 里播放器常被 CSS 缩到 360×203，
         // 按它封顶会把 720P/1080P 档直接排除，且网页铺满 / 系统全屏后尺寸还会变。
         capLevelToPlayerSize: false,
@@ -1521,6 +1524,9 @@ function vvLoadMedia(item) {
                 // hls.js 的 Events/ErrorTypes 是构造函数上的静态成员，实例上没有
                 var hlsEv = hlsCtor.Events || {};
                 var hlsErr = hlsCtor.ErrorTypes || {};
+                // 缓存 loader 的内部实现取自这份 hls.js 的默认 XHR loader（版本可能不同，
+                // 不能在模块加载期静态抓）
+                try { vvOpfsSetInner(hlsCtor); } catch (eOI2) {}
                 var inst = vvTrackHls(new hlsCtor(vvHlsConfig()));
                 VV.active.hls = inst;
                 // 清单/子清单阶段也是"请求在飞"：弱网下主清单跳两级子清单能磨十几秒，
@@ -1562,6 +1568,13 @@ function vvLoadMedia(item) {
                         var ats = inst.audioTracks || [];
                         VV.active.hlsInst = inst;
                         VV.active.audioTracks = ats;
+                        // 字幕轨与音轨同一时机捕获；默认关闭（subtitleTrack -1），
+                        // 用户在「更多 → 字幕」里手动选。
+                        // 注意：全量构建里轨道列表在 MANIFEST_PARSED 之后才由 switchLevel
+                        // 填充（SUBTITLE_TRACKS_UPDATED / AUDIO_TRACKS_UPDATED），这里只兜底，
+                        // 真正的列表更新走下面的事件监听。
+                        try { VV.active.subTracks = inst.subtitleTracks || []; } catch (eSub) { VV.active.subTracks = []; }
+                        try { VV.active.audioTracks = inst.audioTracks || []; } catch (eAud) {}
                         if (ats.length > 1) {
                             VV.active.audioIndex = typeof inst.audioTrack === 'number' ? inst.audioTrack : 0;
                             vvUpdateSpeedChip();
@@ -1575,6 +1588,27 @@ function vvLoadMedia(item) {
                             try { VV.active._earlyT = es.t; } catch (eES2) {}
                         }
                     } catch (eQ) {}
+                });
+                // 轨道列表的真正更新点：全量构建里 switchLevel 在 LEVEL_LOADING 阶段才
+                // 把字幕/音轨组填进 tracksInGroup，随后触发这两个事件（MANIFEST_PARSED
+                // 时 inst.subtitleTracks 还是空数组，只在这里抓会永远拿到 0）。
+                if (hlsEv.SUBTITLE_TRACKS_UPDATED) inst.on(hlsEv.SUBTITLE_TRACKS_UPDATED, function (eST, dST) {
+                    try {
+                        if (!VV.active) return;
+                        VV.active.subTracks = (dST && dST.subtitleTracks) || [];
+                        // 默认关闭：清单标了 AUTOSELECT=YES/DEFAULT=YES 时 hls.js 会自己选轨
+                        // 起播就显示字幕；在用户明确选过之前一律压回 -1。
+                        if (!VV.active._subUserPick && typeof inst.subtitleTrack === 'number' && inst.subtitleTrack >= 0) {
+                            inst.subtitleTrack = -1;
+                        }
+                    } catch (eST2) {}
+                });
+                if (hlsEv.AUDIO_TRACKS_UPDATED) inst.on(hlsEv.AUDIO_TRACKS_UPDATED, function (eAT, dAT) {
+                    try {
+                        if (!VV.active) return;
+                        VV.active.audioTracks = (dAT && dAT.audioTracks) || [];
+                        if (VV.active.audioTracks.length > 1) vvUpdateSpeedChip();
+                    } catch (eAT2) {}
                 });
                 if (hlsEv.LEVEL_SWITCHED) inst.on(hlsEv.LEVEL_SWITCHED, function (eL, dataL) {
                     try {

@@ -54,6 +54,56 @@ function vvMain() {
                 epOpen: vvEpisodesOpen,
                 epClose: vvEpisodesClose,
                 epGo: vvEpGo,
+                // 连播下一集解析的现场：选集表优先 / 媒体 bump 兜底
+                findNext: vvFindNext,
+                // 字幕现场：轨道列表 / 当前选中 / TextTrack 模式与 cue 数（真机验证用）
+                subs: function () {
+                    var a = VV.active || {};
+                    return {
+                        tracks: (a.subTracks || []).map(function (t, i) {
+                            return { i: i, name: t.name || '', lang: t.lang || '' };
+                        }),
+                        sel: a.hlsInst && typeof a.hlsInst.subtitleTrack === 'number' ? a.hlsInst.subtitleTrack : null,
+                        tt: (function () { try { return VID ? VID.textTracks.length : -1; } catch (e) { return -1; } })(),
+                        modes: (function () {
+                            try {
+                                var out = [], tts = VID.textTracks;
+                                for (var i = 0; i < tts.length; i++) out.push(tts[i].mode);
+                                return out;
+                            } catch (e2) { return []; }
+                        })(),
+                        cues: (function () {
+                            try {
+                                var n = 0, tts = VID.textTracks;
+                                for (var i = 0; i < tts.length; i++) if (tts[i].cues) n += tts[i].cues.length;
+                                return n;
+                            } catch (e3) { return -1; }
+                        })()
+                    };
+                },
+                subSet: function (idx) { try { vvSubPick(idx); } catch (e) {} },
+                menuSheet: vvMenuSheet,
+                // 播放缓存现场：支持/开关/命中计数/索引条目（真机验证 OPFS 用）。
+                // cfgReady 由驱动侧轮询等待——索引是异步加载的，boot 时可能还没就绪。
+                cache: function () {
+                    return {
+                        supported: vvOpfs.supported,
+                        ready: vvOpfs.ready,
+                        enabled: vvOpfsEnabled(),
+                        hits: vvOpfs.hits,
+                        misses: vvOpfs.misses,
+                        writes: vvOpfs.writes,
+                        bytes: vvOpfs.bytes,
+                        entries: vvOpfs.index ? vvOpfs.index.size : 0,
+                        errors: vvOpfs.errors
+                    };
+                },
+                cacheWait: function () { return vvOpfsInit(); },
+                cacheClear: function () { return vvOpfsClear(); },
+                cacheSet: function (on) {
+                    VV.cfg.opfsCache = !!on;
+                    vvSet('opfsCache', VV.cfg.opfsCache);
+                },
                 epDiag: vvEpisodesDiag,
                 epNum: vvEpNum,
                 epTemplate: vvEpTemplate,

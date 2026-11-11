@@ -610,6 +610,33 @@ function vvProbeUrl(url, isHls, cb) {
 function vvFindNext() {
     try {
         if (!VV.active) return;
+        // 选集表优先：随机 ID 剧集页每集地址没有集号，下面的「媒体数字 +1」「页面链接 ±1」
+        // 都认不出下一集；选集网格本来就能把这一页的集列出来，表里「当前集 + 1」才是
+        // 唯一可靠来源。本页剧集 → 记 nextPage 跳页（复用 vvNavNext 的 autoNextLast
+        // 通道，新页面自动续播）；嗅探分集 → 直接换源重开，不跳页。
+        var eps = null;
+        try { eps = vvEpisodesScan(false); } catch (eE) { eps = null; }
+        if (eps && eps.current) {
+            var epList = null, epCur = -1;
+            if (eps.current.page >= 0 && eps.page.length) { epList = eps.page; epCur = eps.current.page; }
+            else if (eps.current.media >= 0 && eps.media.length) { epList = eps.media; epCur = eps.current.media; }
+            if (epList) {
+                for (var ei = 0; ei < epList.length; ei++) {
+                    if (epList[ei].num !== epCur + 1) continue;
+                    var nxEp = epList[ei];
+                    if (nxEp.kind === 'page' && nxEp.href) {
+                        VV.active.nextPage = nxEp.href;
+                        vvShowNext(true);
+                        return;
+                    }
+                    if (nxEp.kind === 'media' && nxEp.item) {
+                        VV.active.nextItem = { url: nxEp.item.url, type: nxEp.item.type, name: nxEp.item.name };
+                        vvShowNext(true);
+                        return;
+                    }
+                }
+            }
+        }
         var item = VV.active.item;
         var cands = [];
         var mi = vvNumInfo(item.url);
@@ -1063,6 +1090,35 @@ function vvMenuSheet() {
             return false;
         }
     });
+    // OPFS 播放缓存：命中缓存的分片不再发网络请求（13-opfs.js）
+    items.push({
+        label: '播放缓存',
+        sub: '下载过的视频分片存到本地，重看和回跳不再重新下载；容量超 512MB 自动清理最久没用的',
+        switch: true,
+        on: VV.cfg.opfsCache !== false,
+        act: function () {
+            VV.cfg.opfsCache = VV.cfg.opfsCache === false;
+            vvSet('opfsCache', VV.cfg.opfsCache);
+            vvToast('播放缓存已' + (VV.cfg.opfsCache !== false ? '开启' : '关闭'));
+            return false;
+        }
+    });
+    items.push({
+        label: '清空播放缓存',
+        sub: (function () {
+            try {
+                var b = vvOpfs.bytes || 0;
+                return vvOpfs.ready && b > 0 ? '已缓存 ' + (b / 1048576).toFixed(1) + 'MB' : '暂无缓存';
+            } catch (eSB) { return '暂无缓存'; }
+        })(),
+        icon: 'close',
+        act: function () {
+            vvOpfsClear().then(function (r) {
+                vvToast(r && r.n ? '已清空 ' + r.n + ' 个分片（' + (r.bytes / 1048576).toFixed(1) + 'MB）' : '暂无缓存可清');
+            });
+            return false;
+        }
+    });
     // 开关语义是「开 = 允许网页自动播放」，配置项同名；默认关
     items.push({
         label: '网页视频自动播放',
@@ -1097,6 +1153,17 @@ function vvMenuSheet() {
             icon: 'gear',
             act: function () {
                 vvAudioMenu();
+                return true;
+            }
+        });
+    }
+    if (act.hls && act.subTracks && act.subTracks.length) {
+        var si = act.hlsInst && typeof act.hlsInst.subtitleTrack === 'number' ? act.hlsInst.subtitleTrack : -1;
+        visual.push({
+            label: '字幕：' + (si >= 0 ? vvSubLabel(act.subTracks[si], si) : '关闭'),
+            icon: 'gear',
+            act: function () {
+                vvSubtitleMenu();
                 return true;
             }
         });
@@ -1286,6 +1353,61 @@ function vvAudioMenu() {
                     return false;
                 }
             };
+        });
+        vvSheetShow(items);
+    } catch (e) {}
+}
+
+function vvSubLabel(tr, idx) {
+    var nm = tr && (tr.name || tr.lang) ? (tr.name || tr.lang) : ('字幕 ' + (idx + 1));
+    return String(nm).slice(0, 24);
+}
+
+// 选轨统一入口：标记用户已明确选过（之后清单再发 SUBTITLE_TRACKS_UPDATED 不再压回关闭）；
+// 关闭时 hls.js 的 subtitleTrack=-1 并不会把 TextTrack 的 mode 从 showing 摘下来
+// （原生渲染只管自己选中的那轨），这里手动把所有轨置回 disabled。
+function vvSubPick(idx) {
+    try {
+        var act = VV.active;
+        if (!act || !act.hlsInst) return;
+        act._subUserPick = true;
+        try { act.hlsInst.subtitleTrack = idx; } catch (e0) {}
+        if (idx < 0 && typeof VID !== 'undefined' && VID) {
+            try {
+                var tts = VID.textTracks;
+                for (var i = 0; i < tts.length; i++) tts[i].mode = 'disabled';
+            } catch (e1) {}
+        }
+    } catch (e2) {}
+}
+
+// 字幕选轨：hls.js 原生渲染（renderTextTracksNatively 默认开）——选中轨的
+// TextTrack.mode 会变成 showing，WebView 直接把 cue 画在视频上，我们不做自绘层。
+// 默认关闭（-1）；只对 hls.js 内核生效，原生 HLS 内核的字幕由系统接管。
+function vvSubtitleMenu() {
+    try {
+        var act = VV.active;
+        if (!act || !act.subTracks || !act.subTracks.length) return;
+        var cur = act.hlsInst && typeof act.hlsInst.subtitleTrack === 'number' ? act.hlsInst.subtitleTrack : -1;
+        var items = [{
+            label: '关闭字幕',
+            on: cur < 0,
+            act: function () {
+                vvSubPick(-1);
+                vvToast('字幕 已关闭');
+                return false;
+            }
+        }];
+        act.subTracks.forEach(function (tr, idx) {
+            items.push({
+                label: vvSubLabel(tr, idx),
+                on: cur === idx,
+                act: function () {
+                    vvSubPick(idx);
+                    vvToast('字幕 ' + vvSubLabel(tr, idx));
+                    return false;
+                }
+            });
         });
         vvSheetShow(items);
     } catch (e) {}

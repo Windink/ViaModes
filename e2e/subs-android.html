@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<!-- 字幕真机测试台（MuMu + Via）。
+     素材：e2e/media/hls-subs/master.m3u8 —— 一条视频流挂两条 WebVTT 字幕轨
+     （中文 / English，各 2 段 × 10s，VTT 分片带 X-TIMESTAMP-MAP）。
+     流程：开播放器（有手势）→ 更多菜单走真实 UI 点「字幕 → 中文」→ 断言
+     hls.js subtitleTrack=0、TextTrack mode=showing、cue 已解析且文本命中 →
+     subSet 切 English → 关闭字幕 → 断言无 showing 轨。
+     断言在页面内做，POST /__report 回本地服务，scripts/mumu-subs.mjs 汇总。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>subs</title>
+<style>
+  body { margin: 0; font: 13px/1.6 sans-serif; background: #111; color: #eee; padding: 12px; }
+</style>
+</head>
+<body>
+<h3>字幕真机测试台</h3>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) {
+    var p = kv.split('='); qs[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var RUN = qs.run || ('r' + Date.now());
+  var MEDIA = location.origin + '/e2e/media/hls-subs/master.m3u8';
+  var pass = 0, fail = 0, errs = 0;
+
+  function send(row) {
+    row.run = RUN;
+    try { fetch('/__report', { method: 'POST', body: JSON.stringify(row) }); } catch (e) {}
+  }
+  function log(s) { document.getElementById('log').textContent += s + '\n'; }
+  function ok(name, cond, detail) {
+    if (cond) pass++; else fail++;
+    log((cond ? 'ok   - ' : 'FAIL - ') + name + (detail !== undefined ? '  [' + detail + ']' : ''));
+    send({ tag: 'ok', name: name, pass: !!cond, detail: String(detail === undefined ? '' : detail) });
+  }
+  function fatal(msg) {
+    send({ tag: 'fatal', msg: msg });
+    send({ tag: 'done', pass: pass, fail: fail + 1 });
+    log('FATAL: ' + msg);
+  }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function vv() { return window.__vv || null; }
+  function pv() { return document.querySelector('.vv-player-root video'); }
+
+  // 从当前弹出的菜单里点指定文案的行（vv-sheet-item 的 label 在 .vv-sheet-label 里）
+  function clickSheetRow(rx) {
+    var rows = document.querySelectorAll('#vv-sheet .vv-sheet-item');
+    for (var i = 0; i < rows.length; i++) {
+      var lb = rows[i].querySelector('.vv-sheet-label');
+      if (lb && rx.test(lb.textContent || '')) { rows[i].click(); return true; }
+    }
+    return false;
+  }
+  // 读播放器 video 上 TextTrack 的 cue 文本聚合
+  function cueTexts() {
+    var out = [];
+    try {
+      var v = pv();
+      if (!v) return out;
+      var tts = v.textTracks;
+      for (var i = 0; i < tts.length; i++) {
+        var cs = tts[i].cues;
+        if (!cs) continue;
+        for (var j = 0; j < cs.length; j++) out.push(String(cs[j].text || ''));
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  send({ tag: 'boot', href: location.pathname, media: MEDIA });
+
+  async function main() {
+    var w = await (async function waitVV(ms) {
+      var deadline = Date.now() + (ms || 10000);
+      while (Date.now() < deadline) {
+        if (vv() && vv().VV) return vv();
+        await wait(150);
+      }
+      return null;
+    })();
+    if (!w) { fatal('__vv 没挂出来'); return; }
+
+    try { document.body.click(); } catch (e0) {}
+    w.open({ url: MEDIA, name: 'subs', type: 'HLS', source: 'test' });
+    var v = null;
+    var dl = Date.now() + 15000;
+    while (Date.now() < dl) {
+      v = pv();
+      if (v && w.VV.playerActive && v.duration > 15) break;
+      await wait(300);
+    }
+    ok('播放器已开且时长 ~20s', !!v && v.duration > 15,
+      v ? ('dur=' + v.duration.toFixed(1)) : 'no video');
+    if (!v) { fatal('播放器没起播'); return; }
+
+    // 等字幕轨清单解析完（MANIFEST_PARSED 捕获 subTracks）
+    var s = null;
+    dl = Date.now() + 10000;
+    while (Date.now() < dl) {
+      s = w.subs();
+      if (s.tracks.length >= 2) break;
+      await wait(300);
+    }
+    ok('两条字幕轨', s.tracks.length === 2,
+      JSON.stringify(s.tracks) + ' tt=' + s.tt);
+
+    // 走真实 UI：更多菜单 → 字幕 → 中文
+    w.menuSheet();
+    await wait(400);
+    var hit = clickSheetRow(/^\s*字幕[:：]/);
+    ok('更多菜单有「字幕」行', hit);
+    await wait(400);
+    var hit2 = clickSheetRow(/^\s*中文\s*$/);
+    ok('字幕子菜单有「中文」行', hit2);
+    // 等选中态落地
+    dl = Date.now() + 6000;
+    while (Date.now() < dl && w.subs().sel !== 0) await wait(250);
+    s = w.subs();
+    ok('选中中文轨（subtitleTrack=0）', s.sel === 0, 'sel=' + s.sel);
+    ok('TextTrack 出现且被渲染（mode=showing）', s.modes.indexOf('showing') >= 0,
+      'modes=' + JSON.stringify(s.modes));
+
+    // 等 VTT 分片下载 + cue 解析（0.5s 起第一条 cue 就该在）
+    dl = Date.now() + 12000;
+    var texts = [];
+    while (Date.now() < dl) {
+      texts = cueTexts();
+      if (texts.some(function (t) { return /中文字幕/.test(t); })) break;
+      await wait(400);
+    }
+    ok('中文 cue 已解析', texts.some(function (t) { return /中文字幕/.test(t); }),
+      JSON.stringify(texts).slice(0, 120));
+
+    // 切英文轨（走 API，换轨逻辑同一入口）
+    w.subSet(1);
+    dl = Date.now() + 8000;
+    while (Date.now() < dl && w.subs().sel !== 1) await wait(250);
+    s = w.subs();
+    ok('切到 English 轨（subtitleTrack=1）', s.sel === 1, 'sel=' + s.sel);
+    dl = Date.now() + 10000;
+    var enHit = false;
+    while (Date.now() < dl) {
+      texts = cueTexts();
+      if (texts.some(function (t) { return /English subtitle/.test(t); })) { enHit = true; break; }
+      await wait(400);
+    }
+    ok('English cue 已解析', enHit, JSON.stringify(texts).slice(0, 120));
+
+    // 关闭字幕
+    w.subSet(-1);
+    await wait(500);
+    s = w.subs();
+    ok('关闭字幕（subtitleTrack=-1）', s.sel === -1, 'sel=' + s.sel);
+    ok('关闭后无 showing 轨', s.modes.indexOf('showing') < 0,
+      'modes=' + JSON.stringify(s.modes));
+
+    send({ tag: 'done', pass: pass, fail: fail });
+    log('done: ' + pass + ' passed, ' + fail + ' failed');
+  }
+
+  window.addEventListener('error', function (e) {
+    errs++; send({ tag: 'diag', phase: 'pageErr', msg: String(e.message || e) });
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    send({ tag: 'diag', phase: 'unhandled',
+      msg: String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || e) });
+  });
+
+  async function mainGuarded() {
+    try { await main(); } catch (e) {
+      fatal('main 异常: ' + String((e && (e.stack || e.message)) || e));
+    }
+  }
+  // 只在「脚本由 Via 在 document-start 注入」的真机场景自启：桌面 subs-verify 是
+  // addScriptTag 后注入，页面 main 的 waitVV 会等到桌面注入的 dist 并再次 open——
+  // 两个 hls 实例先后 attach 同一个 video，第二个把第一个的 MSE 会话静默顶掉
+  // （连 MEDIA_DETACHING 都不发），而 VV.active.hlsInst 仍指向前者，字幕选轨全部
+  // 落在僵尸实例上。注意 readyState==='loading' 对内联脚本恒为真（解析期执行），
+  // 区分不了注入方，必须用桌面驱动显式带的 driver=desktop 参数排除。
+  if (document.readyState === 'loading' && !/[?&]driver=desktop/.test(location.search)) {
+    document.addEventListener('DOMContentLoaded', mainGuarded);
+  }
+})();
+</script>
+</body>
+</html>

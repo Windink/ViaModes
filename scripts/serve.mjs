@@ -18,6 +18,7 @@ const TYPES = {
   '.webm': 'video/webm',
   '.m3u8': 'application/vnd.apple.mpegurl',
   '.ts': 'video/mp2t',
+  '.vtt': 'text/vtt; charset=utf-8',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
@@ -87,9 +88,16 @@ http.createServer(async (req, res) => {
     if (/^\/e2e\/aplate-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/aplate-android.html';
     // 回看缓冲真机测试台同理
     if (/^\/e2e\/seekbuf-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/seekbuf-android.html';
-    // HLS 对照页的「网页臂」必须用插件内联的同一份 hls.js（light 构建），
+    // 连播 / 选集跳页自动续播真机测试台同理（页面自己按 part 跳页，整条 run 共用一个别名）
+    if (/^\/e2e\/autonext-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/autonext-android.html';
+    // 字幕真机测试台同理
+    if (/^\/e2e\/subs-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/subs-android.html';
+    // OPFS 播放缓存真机测试台同理
+    if (/^\/e2e\/opfs-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/opfs-android.html';
+    // HLS 对照页的「网页臂」必须用插件内联的同一份 hls.js（全量构建），
     // 否则比的是 hls.js 两个构建的差异，不是播放器本身的差异。
-    if (/^\/e2e\/vendor\/hls-light(?:-[A-Za-z0-9._-]+)?\.js$/.test(pathname)) pathname = '/vendor/hls.light.min.js';
+    // （插件内联已从 light 换成 hls.min.js，此别名跟着换；light 文件留作存档不再被引用）
+    if (/^\/e2e\/vendor\/hls-light(?:-[A-Za-z0-9._-]+)?\.js$/.test(pathname)) pathname = '/vendor/hls.min.js';
     if (/^\/e2e\/vendor\/hls-[A-Za-z0-9._-]+\.js$/.test(pathname)) pathname = '/e2e/vendor/hls.min.js';
     // HLS 镜像代理：/__hls?u=<远程绝对地址>
     // 为什么需要：公网测试流（mux / test-videos）从国内拉一个 1080p 分片要 20s+，

@@ -249,6 +249,52 @@ try {
     ok('点直链直接换源', /\/e2e\/ep2\.mp4$/.test(media.activeUrl), media.activeUrl);
     ok('换源后标题带集数', /第 2 集/.test(media.title), media.title);
 
+    // ---- 连播下一集优先查选集表（随机 ID 剧集页的唯一可靠来源）----
+    // 换源后的播放器在开 +1400ms 会跑一次 vvFindNext。注意此刻套件前面已把 hash
+    // 切到 #ep=5（点第 5 集的断言），页面组当前集 = 5，下一集跳页地址应是 #ep=6。
+    await sleep(1700);
+    const next1 = await page.evaluate(() => {
+        const A = window.__vv.VV.active || {};
+        const b = document.getElementById('vv-next-btn');
+        const cur = window.__vv.epScan(true).current.page;
+        return { nextPage: A.nextPage || '', nextItem: A.nextItem ? A.nextItem.url : '', btn: b ? b.style.display : 'absent', cur: cur };
+    });
+    ok('连播查选集表：本页剧集 → 记下一集跳页地址',
+        /\/e2e\/episodes\.html[^#]*#ep=(\d+)$/.test(next1.nextPage) &&
+            parseInt(next1.nextPage.split('#ep=')[1], 10) === next1.cur + 1,
+        'cur=' + next1.cur + ' → ' + next1.nextPage);
+    ok('选集表命中后不再走媒体 bump', next1.nextItem === '', next1.nextItem);
+    ok('「下一集」按钮点亮', next1.btn === '' || next1.btn === undefined, String(next1.btn));
+
+    // 随机 ID 页（URL 无集号）退化为嗅探分集组：当前媒体 = ep2 → 直接换源到 ep3。
+    // URL 加无关 query、换掉 #ep 锚点、标题去掉集号——三处都能让页面组认出当前集
+    // （hash 走 vvEpNumFromUrl，标题走「第 N 集」正则），不清掉就轮不到媒体组。测完还原。
+    const next2 = await page.evaluate(() => new Promise((res) => {
+        const oldUrl = location.href, oldTitle = document.title;
+        history.replaceState(null, '', oldUrl.replace('?vvdebug=1', '?vvdebug=1&from=rand').replace(/#ep=\d+$/, '#ep=zz'));
+        document.title = '随机 ID 测试台（无集号）';
+        // ep*.mp4 并不存在，起播失败的看门狗重建会把 active 回退到第一帧媒体（ep1），
+        // 探测前提就被冲掉了：这里显式钉住「当前媒体 = ep2」并拆掉看门狗
+        try {
+            const A = window.__vv.VV.active;
+            if (A) { A.item.url = location.origin + '/e2e/ep2.mp4'; A.url = A.item.url; }
+        } catch (e0) {}
+        try { window.__vv.disarmWatchdog(); } catch (e0b) {}
+        try { window.__vv.epScan(true); } catch (e) {}
+        try { window.__vv.findNext(); } catch (e2) {}
+        setTimeout(() => {
+            history.replaceState(null, '', oldUrl);
+            document.title = oldTitle;
+            try { window.__vv.epScan(true); } catch (e3) {}
+            const A = window.__vv.VV.active || {};
+            const d = window.__vv.epScan(false);
+            res({ nextItem: A.nextItem ? A.nextItem.url : '', pageNext: A.nextPage || '',
+                cur: d.current, mediaN: d.media.map((m) => m.num),
+                activeUrl: A.item ? A.item.url : '' });
+        }, 300);
+    }));
+    ok('连播查选集表：嗅探分集 → 直接换源下一集', /\/e2e\/ep3\.mp4$/.test(next2.nextItem), JSON.stringify(next2));
+
     // ---- 收尾：浮层关闭后不残留 ----
     const final = await page.evaluate(() => {
         window.__vv.epClose();

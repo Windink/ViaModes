@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<!-- 连播 + 选集跳页自动续播 真机测试台（MuMu + Via）。
+     三段式流程（同一文件，query part=1/2/3 区分；progress key 按媒体 URL host+path，
+     所以三段各用不同媒体文件，bb720 → bb1080 → bb1080）：
+
+     part1  开播放器（有手势）→ 断言 vvFindNext 从选集表认出「第 2 集」跳页地址
+            → 点选集面板第 2 集格子（vvEpGo：写 autoNextLast{why:'ep'} → 关播放器 → 跳页）
+     part2  无任何手势：boot 的 vvConsumeAutoNext 应在 3s 后自动开播放器（选集跳页通道
+            端到端）→ 断言 findNext 认出第 3 集 → 置 autoplayNext → 播到结束
+            （vvOnEnded → vvNavNext：写 autoNextLast → 跳页）
+     part3  无手势：consume 自动续播（连播通道端到端）→ 断言当前集 = 3 且无下一集
+            → 播到结束 → 「播放结束」自动关播放器
+
+     剧集链接由页面按当前 URL 动态生成（part=N），保证「当前集」靠 href 精确匹配；
+     媒体条目在 __vv 挂出来后立刻注入（必须在 consume 的 3s 定时器之前）。
+     断言在页面内做，POST /__report 回本地服务，scripts/mumu-autonext.mjs 汇总。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>autonext</title>
+<style>
+  body { margin: 0; font: 13px/1.6 sans-serif; background: #111; color: #eee; padding: 12px; }
+  #eps a { display: inline-block; margin: 6px; padding: 6px 12px; background: #333; color: #eee; }
+</style>
+</head>
+<body>
+<h3>连播 / 选集跳页自动续播 真机测试台</h3>
+<div id="eps"></div>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) {
+    var p = kv.split('='); qs[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var PART = parseInt(qs.part || '1', 10) || 1;
+  var RUN = qs.run || ('r' + Date.now());
+  var MEDIA = [null,
+    location.origin + '/e2e/media/bb720.mp4',
+    location.origin + '/e2e/media/bb1080.mp4',
+    location.origin + '/e2e/media/bb1080.mp4'][PART];
+  var pass = 0, fail = 0, errs = 0;
+
+  function urlFor(n) {
+    return location.href.replace(/([?&])part=\d+/, '$1part=' + n);
+  }
+  // 三条「本页剧集」链接：href 与 location.href 同构（只差 part），当前集靠 href 精确匹配
+  (function buildLinks() {
+    var box = document.getElementById('eps');
+    for (var n = 1; n <= 3; n++) {
+      var a = document.createElement('a');
+      a.textContent = '第' + n + '集';
+      a.href = urlFor(n);
+      box.appendChild(a);
+    }
+  })();
+
+  function send(row) {
+    row.run = RUN; row.part = PART;
+    try { fetch('/__report', { method: 'POST', body: JSON.stringify(row) }); } catch (e) {}
+  }
+  function log(s) { document.getElementById('log').textContent += s + '\n'; }
+  function ok(name, cond, detail) {
+    if (cond) pass++; else fail++;
+    log((cond ? 'ok   - ' : 'FAIL - ') + name + (detail !== undefined ? '  [' + detail + ']' : ''));
+    send({ tag: 'ok', name: name, pass: !!cond, detail: String(detail === undefined ? '' : detail) });
+  }
+  function fatal(msg) {
+    send({ tag: 'fatal', part: PART, msg: msg });
+    send({ tag: 'done', part: PART, pass: pass, fail: fail + 1 });
+    log('FATAL: ' + msg);
+  }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function vv() { return window.__vv || null; }
+
+  // 等 __vv 挂出来；挂出来第一件事是把本段媒体注入 VV.items——
+  // part2/3 的 vvConsumeAutoNext 在 boot 后 3s 挑第一个非 BLOB 条目开播放器，
+  // 注入晚了它就挑空了
+  async function waitVV(ms) {
+    var deadline = Date.now() + (ms || 10000);
+    while (Date.now() < deadline) {
+      var w = vv();
+      if (w && w.VV) {
+        try {
+          if (!w.VV.items.length) {
+            w.VV.items.push({ url: MEDIA, type: 'MP4', name: 'autonext-p' + PART, source: 'test' });
+          }
+          if (!w.VV.playerActive && w.showBadgeNew) w.showBadgeNew();
+        } catch (e) {}
+        return w;
+      }
+      await wait(150);
+    }
+    return null;
+  }
+  async function waitPlayer(ms) {
+    var deadline = Date.now() + (ms || 12000);
+    while (Date.now() < deadline) {
+      var v = document.querySelector('.vv-player-root video');
+      if (v && vv() && vv().VV && vv().VV.playerActive) return v;
+      await wait(250);
+    }
+    return null;
+  }
+  // 等到能安全快进（metadata 已解出、总长已知）
+  async function waitDur(v, ms) {
+    var deadline = Date.now() + (ms || 10000);
+    while (Date.now() < deadline) {
+      if (v.duration && isFinite(v.duration) && v.duration > 1 && v.readyState >= 1) return true;
+      await wait(200);
+    }
+    return false;
+  }
+  function pv() { return document.querySelector('.vv-player-root video'); }
+  function scanCur() {
+    try { return vv().epScan(true).current.page; } catch (e) { return -99; }
+  }
+
+  send({ tag: 'boot', part: PART, href: location.pathname + location.search, media: MEDIA });
+
+  async function main() {
+    var w = await waitVV();
+    if (!w) { fatal('__vv 没挂出来'); return; }
+
+    if (PART === 1) {
+      // —— part1：开播放器 → findNext 查选集表 → 点第 2 集格子（vvEpGo 跳页）——
+      try { document.body.click(); } catch (e0) {}
+      w.open({ url: MEDIA, name: 'autonext-p1', type: 'MP4', source: 'test' });
+      var v = await waitPlayer();
+      ok('P1 播放器已打开', !!v, v ? 't=' + v.currentTime.toFixed(1) : 'no video');
+      if (!v) { fatal('P1 播放器没开'); return; }
+      ok('P1 播放器在播', v.paused === false, 'paused=' + v.paused + ' t=' + v.currentTime.toFixed(2));
+
+      var eps = null;
+      try { eps = w.epScan(true); } catch (e1) {}
+      ok('P1 选集表认出 3 集', !!eps && eps.page.length === 3,
+        !!eps ? ('page=' + eps.page.length + ' cur=' + JSON.stringify(eps.current)) : 'no scan');
+      ok('P1 当前集 = 1（href 精确匹配）', !!eps && eps.current.page === 1,
+        'cur=' + (eps ? eps.current.page : '?'));
+
+      // findNext 在开 +1400ms 跑：当前集 1 → 下一集跳页地址 = part2 URL
+      await wait(1900);
+      var A = w.VV.active || {};
+      ok('P1 findNext 从选集表记下第 2 集跳页地址', A.nextPage === urlFor(2),
+        'nextPage=' + (A.nextPage || '""') + ' expect=' + urlFor(2));
+      ok('P1 「下一集」按钮点亮', (function () {
+        var b = document.getElementById('vv-next-btn');
+        return !!b && b.style.display !== 'none';
+      })());
+
+      // 点选集面板第 2 集：vvEpGo 写 autoNextLast{why:'ep',num:2} → 关播放器 → 跳页
+      w.epOpen();
+      await wait(300);
+      var cell = document.querySelector('.vv-ep-cell[data-kind="page"][data-num="2"]');
+      ok('P1 选集面板渲染出第 2 集格子', !!cell);
+      var stored = null;
+      try { stored = w.get('autoNextLast'); } catch (e2) {}
+      if (cell) cell.click();
+      await wait(400);
+      var stored2 = null;
+      try { stored2 = w.get('autoNextLast'); } catch (e3) {}
+      ok('P1 vvEpGo 写入选集续播标记', !!stored2 && stored2.why === 'ep' && stored2.num === 2,
+        JSON.stringify(stored2));
+      ok('P1 跳页前播放器已关', !w.VV.playerActive, 'playerActive=' + w.VV.playerActive);
+      // 断言已发完，交给跳页。没跳成（留在本页）由驱动超时兜底报 FAIL
+      send({ tag: 'done', part: 1, pass: pass, fail: fail });
+      return;
+    }
+
+    if (PART === 2) {
+      // —— part2：无手势，boot 的 vvConsumeAutoNext 自动开播放器（选集跳页通道端到端）——
+      var v2 = await waitPlayer(14000);
+      ok('P2 无手势自动续播：播放器已开', !!v2, v2 ? 't=' + v2.currentTime.toFixed(2) : 'no video');
+      if (!v2) { fatal('P2 consume 没开出播放器'); return; }
+      await wait(1200);
+      ok('P2 播放器在播', v2.paused === false && v2.currentTime > 0,
+        'paused=' + v2.paused + ' t=' + v2.currentTime.toFixed(2) + ' dur=' + v2.duration);
+      ok('P2 播的是 bb1080（本段媒体）', (v2.currentSrc || v2.src || '').indexOf('bb1080') >= 0,
+        v2.currentSrc || v2.src || '');
+
+      var cur2 = scanCur();
+      ok('P2 当前集 = 2', cur2 === 2, 'cur=' + cur2);
+      // findNext 在 open +1400ms 才跑，waitPlayer 检出时刻与 open 之间有偏移，
+      // 固定等 1.2s 会撞竞态（上一轮就栽在这）——轮询等到出现或超时
+      var np2 = null, dl2 = Date.now() + 4000;
+      while (Date.now() < dl2) {
+        var A2x = (vv().VV.active || {}).nextPage || '';
+        if (A2x === urlFor(3)) { np2 = A2x; break; }
+        await wait(250);
+      }
+      var A2 = vv().VV.active || {};
+      ok('P2 findNext 记下第 3 集跳页地址', np2 === urlFor(3),
+        'nextPage=' + (A2.nextPage || '""') + ' expect=' + urlFor(3));
+
+      // 开连播，播到结束 → vvOnEnded → vvNavNext（连播通道）→ 跳 part3
+      w.VV.cfg.autoplayNext = true;
+      if (!(await waitDur(v2, 10000))) { fatal('P2 拿不到视频时长'); return; }
+      send({ tag: 'done', part: 2, pass: pass, fail: fail });
+      try { v2.currentTime = v2.duration - 0.15; } catch (e4) {}
+      // 等 ended 自然触发跳页；没跳走由驱动超时兜底
+      return;
+    }
+
+    if (PART === 3) {
+      // —— part3：无手势，连播标记 → consume 自动续播 ——
+      var v3 = await waitPlayer(14000);
+      ok('P3 连播自动续播：播放器已开', !!v3, v3 ? 't=' + v3.currentTime.toFixed(2) : 'no video');
+      if (!v3) { fatal('P3 consume 没开出播放器'); return; }
+      await wait(1200);
+      ok('P3 播放器在播', v3.paused === false && v3.currentTime > 0,
+        'paused=' + v3.paused + ' t=' + v3.currentTime.toFixed(2));
+      ok('P3 从头播（上一段结束已清进度）', v3.currentTime < 3, 't=' + v3.currentTime.toFixed(2));
+
+      var cur3 = scanCur();
+      ok('P3 当前集 = 3', cur3 === 3, 'cur=' + cur3);
+      var A3 = w.VV.active || {};
+      ok('P3 末集无下一集（选集表与 bump 都认不出）', !A3.nextPage && !A3.nextItem,
+        'nextPage=' + (A3.nextPage || '""') + ' nextItem=' + (A3.nextItem ? A3.nextItem.url : '""'));
+
+      // 播到结束：无下一集 → 「播放结束」→ 自动关播放器
+      if (!(await waitDur(v3, 10000))) { fatal('P3 拿不到视频时长'); return; }
+      try { v3.currentTime = v3.duration - 0.15; } catch (e5) {}
+      var closed = false;
+      var deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        if (vv().VV && !vv().VV.playerActive) { closed = true; break; }
+        await wait(300);
+      }
+      ok('P3 播完自动关播放器（播放结束路径）', closed, 'playerActive=' + (vv().VV && vv().VV.playerActive));
+      send({ tag: 'done', part: 3, pass: pass, fail: fail });
+      log('done: ' + pass + ' passed, ' + fail + ' failed');
+    }
+  }
+
+  window.addEventListener('error', function (e) {
+    errs++; send({ tag: 'diag', part: PART, phase: 'pageErr', msg: String(e.message || e) });
+  });
+  // async main 里任何一步抛错都会变成 unhandled rejection 静默死掉——
+  // 驱动轮就出现过 boot 到了、后续断言全无，不加这个根本查不到现场
+  window.addEventListener('unhandledrejection', function (e) {
+    send({ tag: 'diag', part: PART, phase: 'unhandled',
+      msg: String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || e) });
+  });
+
+  async function mainGuarded() {
+    try {
+      await main();
+    } catch (e) {
+      fatal('main 异常: ' + String((e && (e.stack || e.message)) || e));
+    }
+  }
+
+  // 自启守卫：readyState==='loading' 对内联脚本恒为真，区分不了注入方。
+  // 桌面驱动（addScriptTag 注入 dist）必须带 driver=desktop，页面不自启，
+  // 否则页面 main 与桌面驱动各开一个 hls 实例互相顶掉（见 subs-android.html 同款注释）。
+  if (document.readyState === 'loading' && !/[?&]driver=desktop/.test(location.search)) {
+    document.addEventListener('DOMContentLoaded', mainGuarded);
+  } else if (!/[?&]driver=desktop/.test(location.search)) {
+    mainGuarded();
+  }
+})();
+</script>
+</body>
+</html>

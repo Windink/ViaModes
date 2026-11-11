@@ -106,6 +106,9 @@ var VV_CSS = `
 /* all: initial：连站点的 video{display/position/filter/transform} 一起清掉，
    否则站点给 video 加的圆角、滤镜、内边距都会渗进来 */
 .vv-player-video { all: initial; display: block; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; background: #000; }
+/* hls.js 原生字幕（TextTrack cue）默认白字透明底贴在画面底部，深色画面上读不清。
+   ::cue 只接受简单声明，WebView 110 支持。 */
+.vv-player-video::cue { background: rgba(0, 0, 0, 0.6); color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
 .vv-bright { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 140; }
 /* 起播等待期的封面：铺满 + 轻微模糊，既盖住"还没出画"的黑屏，又不会被当成已经播起来了 */
 .vv-poster { position: absolute; inset: 0; z-index: 130; opacity: 0; pointer-events: none;

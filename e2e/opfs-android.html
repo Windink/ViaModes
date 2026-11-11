@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<!-- OPFS 播放缓存测试台（MuMu + Via / 桌面 Chrome）。
+     素材：e2e/media/hls-subs/master.m3u8（~20s，7 片，全流缓冲）。
+     part=full   两轮 open 同一 URL：第一轮全 MISS 并写入缓存，第二轮命中缓存；
+                 断言 supported / misses / writes / entries / hits / 命中后正常出画。
+     part=persist 跨进程验证（真机由驱动先 force-stop Via）：断言索引从磁盘恢复
+                 （entries>0）且命中（hits>=1）。
+     桌面 scripts/opfs-verify.mjs 用 driver=desktop 参数自驱，页面不自启。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opfs</title>
+<style>
+  body { margin: 0; font: 13px/1.6 sans-serif; background: #111; color: #eee; padding: 12px; }
+</style>
+</head>
+<body>
+<h3>OPFS 缓存测试台</h3>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) {
+    var p = kv.split('='); qs[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var RUN = qs.run || ('r' + Date.now());
+  var PART = qs.part || 'full';
+  var MEDIA = location.origin + '/e2e/media/hls-subs/master.m3u8';
+  var pass = 0, fail = 0;
+
+  function send(row) {
+    row.run = RUN;
+    try { fetch('/__report', { method: 'POST', body: JSON.stringify(row) }); } catch (e) {}
+  }
+  function log(s) { document.getElementById('log').textContent += s + '\n'; }
+  function ok(name, cond, detail) {
+    if (cond) pass++; else fail++;
+    log((cond ? 'ok   - ' : 'FAIL - ') + name + (detail !== undefined ? '  [' + detail + ']' : ''));
+    send({ tag: 'ok', name: name, pass: !!cond, detail: String(detail === undefined ? '' : detail) });
+  }
+  function fatal(msg) {
+    send({ tag: 'fatal', msg: msg });
+    send({ tag: 'done', pass: pass, fail: fail + 1 });
+    log('FATAL: ' + msg);
+  }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function vv() { return window.__vv || null; }
+  function pv() { return document.querySelector('.vv-player-root video'); }
+
+  send({ tag: 'boot', href: location.pathname, part: PART });
+
+  // 等缓存索引就绪（boot 时异步 init）
+  async function waitCache(ms) {
+    var dl = Date.now() + (ms || 8000);
+    while (Date.now() < dl) {
+      if (vv() && vv().cache && vv().cache().ready) return true;
+      await wait(150);
+    }
+    return false;
+  }
+  // 开播放器并等起播出画
+  async function openAndWait(tag) {
+    try { document.body.click(); } catch (e0) {}
+    vv().open({ url: MEDIA, name: tag, type: 'HLS', source: 'test' });
+    var dl = Date.now() + 15000;
+    while (Date.now() < dl) {
+      var v = pv();
+      if (v && vv().VV.playerActive && v.readyState >= 2 && v.duration > 15) return v;
+      await wait(300);
+    }
+    return null;
+  }
+  // 等缓存计数满足条件（写满 N 片 / 命中 ≥M 次）
+  async function waitCacheStat(fn, ms) {
+    var dl = Date.now() + (ms || 10000);
+    while (Date.now() < dl) {
+      var c = vv().cache();
+      if (fn(c)) return c;
+      await wait(250);
+    }
+    return vv().cache();
+  }
+
+  async function main() {
+    var w = await (async function waitVV(ms) {
+      var dl = Date.now() + (ms || 10000);
+      while (Date.now() < dl) {
+        if (vv() && vv().VV && vv().cache) return vv();
+        await wait(150);
+      }
+      return null;
+    })();
+    if (!w) { fatal('__vv 没挂出来'); return; }
+
+    var ready = await waitCache();
+    var c0 = w.cache();
+    ok('OPFS 环境支持且索引就绪', ready && c0.supported,
+      'supported=' + c0.supported + ' ready=' + c0.ready);
+
+    if (PART === 'persist') {
+      ok('索引从磁盘恢复（entries>0）', c0.entries > 0,
+        'entries=' + c0.entries + ' bytes=' + c0.bytes);
+      var v3 = await openAndWait('persist');
+      ok('persist 轮起播出画', !!v3, v3 ? 'dur=' + v3.duration.toFixed(1) : 'no video');
+      if (!v3) { fatal('persist 轮没起播'); return; }
+      var c3 = await waitCacheStat(function (c) { return c.hits >= 1; }, 10000);
+      ok('跨进程命中缓存（hits>=1）', c3.hits >= 1, 'hits=' + c3.hits + ' misses=' + c3.misses);
+      ok('命中后 video 仍在正常播放', pv() && pv().readyState >= 2,
+        'readyState=' + (pv() && pv().readyState));
+    } else {
+      // full 轮要测「写入 + 命中」全流程：OPFS 真持久，上一轮套件留下的缓存
+      // 会让本轮第一轮直接全命中——先清空，保证起点干净（persist 轮不清）。
+      try { await w.cacheClear(); } catch (eC) {}
+      await wait(600);
+      c0 = w.cache();
+      ok('full 轮起点缓存已清空', c0.entries === 0, 'entries=' + c0.entries);
+      // 第一轮：全 MISS → 写缓存
+      var v1 = await openAndWait('round1');
+      ok('第一轮起播出画', !!v1, v1 ? 'dur=' + v1.duration.toFixed(1) : 'no video');
+      if (!v1) { fatal('第一轮没起播'); return; }
+      var c1 = await waitCacheStat(function (c) { return c.writes > 0 && c.entries > 0; }, 12000);
+      ok('分片写入缓存（writes>0）', c1.writes > 0, 'writes=' + c1.writes + ' errors=' + c1.errors);
+      ok('缓存有条目（entries>0）', c1.entries > 0, 'entries=' + c1.entries + ' bytes=' + c1.bytes);
+      ok('第一轮是网络加载（misses>0）', c1.misses > 0, 'misses=' + c1.misses);
+      ok('缓存无写入错误', c1.errors === 0, 'errors=' + c1.errors);
+      w.forceClose();
+      await wait(800);
+
+      // 第二轮：同 URL → 命中
+      var v2 = await openAndWait('round2');
+      ok('第二轮起播出画', !!v2, v2 ? 'dur=' + v2.duration.toFixed(1) : 'no video');
+      if (!v2) { fatal('第二轮没起播'); return; }
+      var c2 = await waitCacheStat(function (c) { return c.hits >= 1; }, 10000);
+      ok('第二轮命中缓存（hits>=1）', c2.hits >= 1, 'hits=' + c2.hits + ' misses=' + c2.misses);
+      ok('命中后 entries 不减少', c2.entries >= c1.entries, c2.entries + '>=' + c1.entries);
+      ok('命中后 video 仍在正常播放', pv() && pv().readyState >= 2,
+        'readyState=' + (pv() && pv().readyState));
+      w.forceClose();
+    }
+
+    send({ tag: 'done', pass: pass, fail: fail });
+    log('done: ' + pass + ' passed, ' + fail + ' failed');
+  }
+
+  window.addEventListener('error', function (e) {
+    send({ tag: 'diag', phase: 'pageErr', msg: String(e.message || e) });
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    send({ tag: 'diag', phase: 'unhandled',
+      msg: String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || e) });
+  });
+
+  async function mainGuarded() {
+    try { await main(); } catch (e) {
+      fatal('main 异常: ' + String((e && (e.stack || e.message)) || e));
+    }
+  }
+  // 自启守卫：readyState==='loading' 对内联脚本恒为真，区分不了注入方，
+  // 桌面驱动必须带 driver=desktop（见 subs-android.html 同款注释）
+  if (document.readyState === 'loading' && !/[?&]driver=desktop/.test(location.search)) {
+    document.addEventListener('DOMContentLoaded', mainGuarded);
+  }
+})();
+</script>
+</body>
+</html>
