@@ -38,10 +38,10 @@ var VV_CT_TYPE = {
 var VV_SCAN_RX = /(?:https?:)?\/\/[^\s"'`<>\\)\]{}]{4,600}?\.(?:m3u8|mp4|m4v|webm|mkv|flv|f4v)(?:\?[^\s"'`<>\)\]{}]{0,300})?/gi;
 
 var VV = {
-    // 构建时由 build.mjs 注入（VV_VERSION 会随改动自动 +1）。
+    // 构建时由 build.mjs 注入（语义化版本号，随产物哈希与 CHANGELOG「未发布」段自动递增）。
     // 写死版本号是之前"改了还是没生效"的根源：Via 按 @version 判断要不要更新，
     // 版本号不动，装进去的就永远是旧脚本。
-    version: (typeof VV_VERSION !== 'undefined' ? VV_VERSION : '0.1.3'),
+    version: (typeof VV_VERSION !== 'undefined' ? VV_VERSION : '1.0.0'),
     build: (typeof VV_BUILD !== 'undefined' ? VV_BUILD : ''),
     items: [],
     seen: {},

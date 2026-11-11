@@ -1,7 +1,7 @@
 # 变更记录
 
 本文件记录每个版本改了什么。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，  
-版本号遵循 `主.次.修订`，由 `build.mjs` 按产物哈希自动递增修订位（Via 的更新判断依赖 `@version`）。
+版本号遵循语义化版本控制（SemVer，`主.次.修订`）：主版本号 = 破坏性变更、次版本号 = 向后兼容的新功能、修订号 = 修复/重构/文档。`@version` 由 `build.mjs` 在构建时按产物哈希与 CHANGELOG「未发布」段自动递增（Via 的更新判断依赖 `@version`，所以产物一变版本必变）。`node build.mjs` 可用 `--major/--minor/--patch` 显式定档、`--dry-run` 预演。
 
 ## 记录规则
 
@@ -15,12 +15,112 @@
    只有**功能本身不同**（哪怕同一天发），才拆成两条。记录写的是「最后交付了什么」，  
    不是「我改了几次」；过程中想记的坑写进 README 或 `scripts/` 注释，那里才是给后来人的地方。
 5. 跑 `node build.mjs` 时，「未发布」段会被**自动定版**为 `## v当前版本 — 日期`（跨版则写成区间），  
-   并在顶部补一个空的「未发布」段。定版不看本次构建有没有升版本，所以「先 build 后补记」也能自愈。
+   并在顶部补一个空的「未发布」段。定版不看本次构建有没有升版本，所以「先 build 后补记」也能自愈。  
+   升哪位（major / minor / patch）由「未发布」段内容与 `--major/--minor/--patch` 开关决定：  
+   `### 新增` → minor（新功能），`### 移除` 或含 `BREAKING`/`破坏性` → major（破坏性），其余 → patch（修复/重构/文档）。
 6. 「未发布」为空、当前版本又没有条目覆盖时，`build.mjs` 会打印 `!!! CHANGELOG 漏记 !!!`，  
    而且每次构建都提醒，直到补上——这就是漏记。
 7. 只改文档、注释、测试断言也算改动，同样要记一行。
 
 ## 未发布
+
+## v1.0.0 — 2026-11-11
+
+### 变更
+- **版本号方案升级为语义化版本控制（SemVer）并重置基线为 `1.0.0`**（前身 `0.1.111`，整合 OPFS 缓存、字幕、选集、网页铺满、页内小窗等能力）。主版本号标记破坏性变更、次版本号标记向后兼容的新功能、修订号标记修复/重构/文档；`@version` 仍由 `build.mjs` 在构建时按产物哈希与 CHANGELOG「未发布」段自动递增，Via 的更新判断不受影响（`1.0.0 > 0.1.111`）。`node build.mjs` 支持 `--major/--minor/--patch` 显式定档与 `--dry-run` 预演；不带开关时升哪位由「未发布」段内容推导（`### 新增`→minor，`### 移除`/含 `BREAKING`/`破坏性`→major，其余→patch），显式开关可覆盖推导。README「构建」章节新增版本号递增规则表，列出上述映射与「无源码改动不要强行 `--patch`」的假更新警示。
+
+## v0.1.105–v0.1.111 — 2026-11-11
+
+### 新增
+- OPFS 播放缓存：hls.js 的媒体分片下载进 Origin Private File System，同 URL 再播
+  （重复观看、回看、跨页面回播）直接从磁盘读、不发网络请求。只缓存分片不缓存清单
+  （直播轮换/防盗链地址变更不受缓存干扰）；key = host+path（去 query：分片 URL 的
+  query 常是一次性 token，留着永远命不中），byte-range 分片（fMP4 的
+  EXT-X-BYTERANGE）再拼区间；AES 加密流缓存密文、hls.js 命中后照常解密。
+  「更多」菜单加「播放缓存」开关（默认开）与「清空播放缓存」（显示已缓存量）；
+  WebView 不支持 OPFS 时静默禁用、走原网络加载。
+  实现上踩掉的六个坑：① hls.js 在 load() 时就把 `frag.stats` 指到 loader 实例的
+  stats（`e.stats=h.stats`），包装 loader 必须把内部 XHR loader 的网络计时同步回来，
+  否则诊断面板的下载速率统计和 ABR 的带宽估计拿到全 0（e2e 的速率行断言揪出来的，
+  真产品 bug）；② 命中缓存时 stats 用磁盘读的真实耗时（给 0ms 会让诊断输出 NaN，
+  也给 ABR 一个失真的带宽样本）；③ `resp.data` 的 ArrayBuffer 会被 hls.js transfer
+  给 transmux worker（detach 后 byteLength=0），异步写 OPFS 前必须在同步栈里先
+  `slice(0)` 复制，否则写出去 0 字节文件、读回 size 校验失败、删条目重下死循环；
+  ④ init 有重入保护——并发的第二个 init 会在索引未读入的空 Map 上跑对账，把已落盘
+  的分片当孤儿删光；⑤ 索引只在确认读过 index.json 时才删孤儿文件（读失败不该毁掉
+  还能用的缓存）；⑥ put 成功后立即提交索引（createWritable 是临时文件+原子提交，
+  页面在防抖窗口内被关掉的话提交随页面被掐，index.json 从未落地、缓存全作废），
+  另加 pagehide/visibilitychange flush 兜底。总量超 512MB 按「最久未命中」驱逐到
+  80%；索引存目录内 index.json，启动时与实际文件对账。
+
+### 测试
+- 新增桌面预检 `scripts/opfs-verify.mjs`（11 项）+ 真机套件 `scripts/mumu-opfs.mjs`
+  + `e2e/opfs-android.html`（16 项）：full 轮（先清缓存保起点干净——OPFS 真持久，
+  上一轮套件留下的缓存会让第一轮直接全命中）验证第一轮全 MISS 写缓存、第二轮同
+  URL 命中、命中后正常出画；persist 轮（force-stop Via 后重开）验证索引从磁盘恢复
+  且命中——确认 WebView 110 的 OPFS 真持久化。桌面 11/11、真机 v0.1.111 16/16。
+- e2e-verify 每轮开头清一次播放缓存：慢网/诊断段要的是真实网络行为，上一轮跑过的
+  测试流分片留在 OPFS 里（同一台机器跨浏览器进程也命中）会把慢网断言架空。
+
+### 测试
+- e2e 测试页（subs-android / autonext-android）的自启守卫从 `readyState==='loading'` 改为
+  显式 `driver=desktop` 参数排除：内联脚本在 HTML 解析期执行时 readyState 恒为 'loading'，
+  区分不了注入方——桌面 subs-verify 注入 dist 后，页面 main 的 waitVV 仍会等到 `__vv` 并
+  二次 open。两个 hls 实例先后 attach 同一个 video，后者把前者的 MSE 会话静默顶掉
+  （连 MEDIA_DETACHING 都不触发），而 `VV.active.hlsInst` 仍指向前者，字幕选轨全部落在
+  僵尸实例上（桌面表现为「选轨后 TextTrack 永不渲染」）。排查用 hook 已证实双实例
+  （两个 NEW-INSTANCE + 第二个 attachMedia 抢占），修正后桌面 subs-verify 11/11 全过。
+
+## v0.1.101–v0.1.104 — 2026-11-11
+
+### 新增
+- 内置播放器支持字幕：多码率 HLS 清单里带 WebVTT 字幕轨（`#EXT-X-MEDIA TYPE=SUBTITLES`）时，
+  「更多 → 字幕」列出所有轨（中文 / English 等）供选轨或关闭。渲染走 hls.js 原生管道
+  （`renderTextTracksNatively` 默认开，选中轨的 TextTrack.mode=showing，WebView 直接画 cue），
+  脚本只补了一条 `::cue` 样式（黑底白字 + 描边），不做自绘层。默认关闭，选轨后立即生效、
+  不持久化；只对 hls.js 内核生效，原生 HLS 内核与直链 mp4 的内嵌字幕由系统接管。
+  默认关闭在「轨道列表更新事件」里落实：全量构建的轨道列表在 MANIFEST_PARSED 之后才由
+  switchLevel 填充，清单标了 AUTOSELECT/DEFAULT 的流起播就会自动亮字幕，所以在
+  SUBTITLE_TRACKS_UPDATED 里把没被用户选过的实例（`_subUserPick` 未置位）压回
+  `subtitleTrack=-1`；用户关闭时除置 -1 外还要手动把 TextTrack 全部 mode='disabled'
+  （hls.js 的 `subtitleTrack=-1` 不会清掉已 showing 的轨）。
+- 内联的 hls.js 从 light 构建换成**全量 hls.min.js**（vendor 386KB → 620KB，dist 实际字节
+  784KB → 1069KB）：light 的字幕/音轨控制器是空壳——getter、事件常量都在，SUBTITLES 组也
+  会进 MANIFEST_PARSED 载荷，但 SubtitleTrackController/AudioTrackController 从不填充轨道列表
+  （SUBTITLE_TRACKS_UPDATED 永不触发，`hls.subtitleTracks` 恒为空），字幕功能在 light 上无从
+  实现。换全量后顺带把一直死着的「音轨」菜单救活（此前 `audioTracks` 恒为空，菜单永不出现）。
+  桌面实测全量构建加载同一 master 清单 subtitleTracks=2、选中轨 cue 立即渲染；每页预解析
+  开销按此前量化外推约 +6ms，仍远低于两帧门槛。
+- `__vv` 调试句柄补 `subs`（轨道/选中/TextTrack 模式/cue 数）、`subSet`（切轨）、
+  `menuSheet`（打开更多菜单，真机走真实 UI 验证用）。
+
+### 测试
+- 新增桌面预检 `scripts/subs-verify.mjs`（11 项）与真机套件 `scripts/mumu-subs.mjs` +
+  `e2e/subs-android.html`（11 项）：菜单真实 UI 点「更多 → 字幕 → 中文」→ 断言 TextTrack
+  showing 与 cue 文本 → 切 English → 关闭后无 showing 轨。真机 v0.1.104（MuMu + Via
+  7.3.3 / WebView 110）11/11 通过。
+- 内核更换回归：smoke 427/427、e2e-verify 48/48、真机画质红线 `mumu-quality` 17/17
+  （全量内核下 `capLevel*` 仍 false、`startLevel=-1`、`autoLevelCapping=-1`，ABR 自动档、
+  实际解码 480p 高于最低档）、`mumu-open-ab` A/B 对照与既有基线一致（mp4 直链不走
+  hls.js，无新增回归）。
+
+## v0.1.100 — 2026-11-11
+
+### 变更
+- 连播「下一集」优先查选集表：原来 `vvFindNext` 只会「媒体 URL 数字 +1」和「页面链接集号 ±1」，
+  随机 ID 剧集页（每集地址无集号，如央视网 VID 页）两条路都认不出下一集，播完只能「播放结束」。
+  现在先查选集网格的扫描结果——「当前集 + 1」命中本页剧集 → 记跳页地址（复用 `vvNavNext`
+  的 autoNextLast 通道，新页面自动续播）；命中嗅探分集 → 直接换源不跳页；都没命中再走原逻辑。
+- `__vv` 调试句柄补 `findNext`（自动化验证连播解析的现场用）。
+
+### 测试
+- 桌面 `scripts/episodes-verify.mjs` 补 4 条断言：选集表命中 → 记下一集跳页地址 /
+  不再走媒体 bump / 「下一集」按钮点亮；随机 ID 页退化为嗅探分集 → 直接换源下一集。
+- 新增真机套件 `scripts/mumu-autonext.mjs` + `e2e/autonext-android.html`（18 项，三段自驱跳页）：
+  part1 验证 findNext 选集表解析 + vvEpGo 写标记跳页；part2 无手势验证选集跳页通道端到端
+  （boot 的 vvConsumeAutoNext 自动续播）；part3 无手势验证连播通道（vvNavNext → 自动续播）
+  及末集「播放结束」自动关播放器。顺带把「autoNextLast 跨页自动播放」这条遗留未验项验掉了：
+  两条通道真机都能无人手势自动起播。
 
 ## v0.1.99 — 2026-11-11
 

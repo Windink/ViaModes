@@ -7,13 +7,14 @@ const SRC = 'src';
 const OUT = 'dist/via-video-player.user.js';
 const VER_FILE = '.version';
 const HASH_FILE = '.tmp/build.hash';
-const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '12-autoplay.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '45-pagefs.js', '46-episodes.js', '50-boot.js'];
+const MODULES = ['00-core.js', '10-sniffer.js', '11-style.js', '12-autoplay.js', '13-opfs.js', '20-ui.js', '30-player.js', '31-player-x.js', '32-share.js', '33-multiplayer.js', '40-menu.js', '45-pagefs.js', '46-episodes.js', '50-boot.js'];
 
-// ---- 版本号必须每次改动都变 ----
-// Via 的「更新」是按 @version 比较的，版本号不动 = 永远不更新。
-// 之前连着几轮修复都停在 0.1.3，装进 Via 的其实一直是第一版，
-// 这是"改了还是没用"的一个真实来源。这里用产物哈希判断有没有变，
-// 变了就把 patch 位 +1，并把 build 时间一起写进头部，方便一眼核对装的哪版。
+// ---- 版本号：语义化版本控制（SemVer），与构建自动同步 ----
+// Via 按 @version 比较决定「有没有新版」，版本号不动 = 永远不更新，
+// 所以「产物哈希变了」必须升版本。升哪一位由 build.mjs 定（开关 > CHANGELOG 推导 > 默认 patch）：
+//   --major 主版本 +1（破坏性变更）  --minor 次版本 +1（新功能）  --patch/默认 修订 +1（修复/重构/文档）
+//   不带开关且哈希变了时，看 CHANGELOG「未发布」段：### 移除 / BREAKING → major，### 新增 → minor，其余 → patch。
+// build 时间一起写进头部，方便一眼核对装的哪版。
 let body = '';
 
 // hls.js 以 Apache-2.0 分发，第 4(a) 条要求向接收方提供许可证副本与版权声明。
@@ -23,13 +24,17 @@ let body = '';
 const HLS_BANNER = '/*! hls.js 1.7.3 | Copyright (c) 2017 Dailymotion (http://www.dailymotion.com)'
     + ' | Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0)'
     + ' | https://github.com/video-dev/hls.js'
-    + ' | 本副本为官方 dist/hls.light.min.js 原样内联，未修改；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */';
+    + ' | 本副本为官方 dist/hls.min.js 原样内联，未修改；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */';
 
-if (existsSync('vendor/hls.light.min.js')) {
-    const size = (await statSync('vendor/hls.light.min.js')).size;
+// 为什么从 light 换成全量构建：light 的字幕/音轨控制器是空壳——getter 和事件常量都在，
+// 但 SubtitleTrackController/AudioTrackController 从不填充轨道列表（SUBTITLE_TRACKS_UPDATED
+// 永不触发，subtitleTracks 恒为空数组），hls.min.js 实测 subtitleTrack=0 立即渲染 cue。
+// 代价是 vendor 386KB → 620KB（dist 约 +234KB），换来字幕与音轨两个功能可用。
+if (existsSync('vendor/hls.min.js')) {
+    const size = (await statSync('vendor/hls.min.js')).size;
     if (size > 20000) {
-        let vendor = await readFile('vendor/hls.light.min.js', 'utf8');
-        body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://unpkg.com/hls.js@1/dist/hls.light.min.js"];\n';
+        let vendor = await readFile('vendor/hls.min.js', 'utf8');
+        body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://unpkg.com/hls.js@1/dist/hls.min.js"];\n';
         body += HLS_BANNER + '\n';
         body += '(function(){try{' + vendor + '}catch(e){}})();\n';
         // 站点常在之后注入自家魔改版 hls.js（页面自带的定制构建就是），会覆盖 window.Hls。
@@ -38,7 +43,7 @@ if (existsSync('vendor/hls.light.min.js')) {
         console.log('vendor hls.js inlined:', size, 'bytes');
     }
 } else {
-    body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js","https://unpkg.com/hls.js@1/dist/hls.light.min.js"];\n';
+    body += 'var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://unpkg.com/hls.js@1/dist/hls.min.js"];\n';
     console.log('vendor hls.js missing, runtime CDN fallback only');
 }
 
@@ -49,18 +54,62 @@ for (const f of MODULES) {
 }
 
 const hash = createHash('sha1').update(body).digest('hex').slice(0, 12);
-let ver = '0.1.3';
+
+// 语义化版本工具（主.次.修订）
+const parseVer = (s) => String(s).split('.').map(Number);
+const cmpVer = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+function bumpVer(v, type) {
+    const [maj, min, pat] = parseVer(v);
+    if (type === 'major') return `${maj + 1}.0.0`;
+    if (type === 'minor') return `${maj}.${min + 1}.0`;
+    return `${maj}.${min}.${pat + 1}`;
+}
+
+// 命令行开关（开关优先级最高，覆盖下面的 CHANGELOG 推导）
+const argv = process.argv.slice(2);
+const hasArg = (f) => argv.includes(f);
+const forcedBump = hasArg('--major') ? 'major' : hasArg('--minor') ? 'minor' : hasArg('--patch') ? 'patch' : null;
+const dryRun = hasArg('--dry-run') || hasArg('-n');
+
+let ver = '1.0.0';
 try { ver = (await readFile(VER_FILE, 'utf8')).trim() || ver; } catch (e) {}
 let prevHash = '';
 try { prevHash = (await readFile(HASH_FILE, 'utf8')).trim(); } catch (e) {}
-const bumped = prevHash !== hash;
-if (bumped) {
-    const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(ver);
-    ver = m ? `${m[1]}.${m[2]}.${Number(m[3]) + 1}` : '0.1.4';
-    await writeFile(VER_FILE, ver + '\n', 'utf8');
-    console.log('version ->', ver, '(source changed)');
+const sourceChanged = prevHash !== hash;
+
+// 决定升哪位：开关优先；否则哈希变了就看 CHANGELOG「未发布」段
+//   ### 移除 / BREAKING → major；### 新增 → minor；其余（变更/修复/测试/空）→ patch
+let bumpType = forcedBump;
+if (!bumpType && sourceChanged) {
+    let section = '';
+    try {
+        const ct = await readFile('CHANGELOG.md', 'utf8');
+        const at = ct.indexOf('## 未发布');
+        if (at >= 0) {
+            const rest = ct.slice(at + '## 未发布'.length);
+            const nx = rest.search(/\n## /);
+            section = nx < 0 ? rest : rest.slice(0, nx);
+        }
+    } catch (e) {}
+    if (/BREAKING|破坏性变更?/.test(section) || /^###\s*移除/m.test(section)) bumpType = 'major';
+    else if (/^###\s*新增/m.test(section)) bumpType = 'minor';
+    else bumpType = 'patch';
+}
+const willBump = !!bumpType && (sourceChanged || !!forcedBump);
+
+if (dryRun) {
+    const next = bumpType ? bumpVer(ver, bumpType) : ver;
+    console.log(`[dry-run] ${ver} ${bumpType ? '-> ' + next + ' (' + bumpType + ')' : '(no bump)'}`);
+    process.exit(0);
+}
+
+if (willBump) {
+    const next = bumpVer(ver, bumpType);
+    await writeFile(VER_FILE, next + '\n', 'utf8');
+    console.log('version ->', next, '(' + bumpType + (sourceChanged ? ', source changed' : ', forced') + ')');
+    ver = next;
 } else {
-    console.log('version stays', ver, '(no source change)');
+    console.log('version stays', ver, sourceChanged ? '(no bump rule matched)' : '(no source change)');
 }
 try { await writeFile(HASH_FILE, hash + '\n', 'utf8'); } catch (e) {}
 
@@ -84,8 +133,6 @@ try { await writeFile(HASH_FILE, hash + '\n', 'utf8'); } catch (e) {}
 const CHANGELOG = 'CHANGELOG.md';
 const CHANGELOG_HEAD = '## 未发布';
 
-const parseVer = (s) => String(s).split('.').map(Number);
-const cmpVer = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
 // 标题两种写法：`## v0.1.53 — 日期`、`## v0.1.53–v0.1.55 — 日期`
 const TITLE_RE = /^## v(\d+\.\d+\.\d+)(?:\s*(?:[–—~-]|至)\s*v?(\d+\.\d+\.\d+))?/gm;
 
@@ -135,10 +182,11 @@ async function syncChangelog() {
             if (ranges.length) {
                 let hi = ranges[0][1];
                 for (const r of ranges) if (cmpVer(r[1], hi) > 0) hi = r[1];
-                // 只在同一 minor 下推算，跨 minor 时保守地只记当前版本
-                if (hi[0] === cur[0] && hi[1] === cur[1] && hi[2] + 1 < cur[2]) {
-                    start = `${cur[0]}.${cur[1]}.${hi[2] + 1}`;
-                }
+                // 从「已记录最高版本」的下一个版本起算（跨 minor/major 也成立）
+                let nh = [hi[0], hi[1], hi[2] + 1];
+                if (nh[2] > 999) { nh[2] = 0; nh[1] += 1; }
+                if (nh[1] > 999) { nh[1] = 0; nh[0] += 1; }
+                if (cmpVer(nh, cur) < 0) start = nh.join('.');
             }
             const title = start === ver ? `## v${ver}` : `## v${start}–v${ver}`;
             const date = new Date().toISOString().slice(0, 10);
