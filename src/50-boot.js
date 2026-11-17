@@ -56,6 +56,11 @@ function vvMain() {
                 epGo: vvEpGo,
                 // 连播下一集解析的现场：选集表优先 / 媒体 bump 兜底
                 findNext: vvFindNext,
+                // 「下一集」的原地换集链路：按钮 / 取回下一集页面 / 解析器，分开暴露，
+                // 真机与桌面验证能分别断言"有没有跳页""解析出哪些地址"
+                goNext: vvGoNext,
+                nextFromPage: vvNextFromPage,
+                nextMedia: vvMediaFromHtml,
                 // 字幕现场：轨道列表 / 当前选中 / TextTrack 模式与 cue 数（真机验证用）
                 subs: function () {
                     var a = VV.active || {};

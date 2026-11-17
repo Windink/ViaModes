@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  「下一集」原地换集的跨页测试台（第 1 集）。
+  三集是三份独立 HTML，每份自带一条自己的视频地址——真实影视站就是这样：
+  每集一个页面，片源写在那一页的 HTML / JS 里，不点进去拿不到。
+
+  页面本身不引脚本：桌面套件用 evaluateOnNewDocument 注入 dist，
+  真机（Via）用的是设备上已安装的脚本，同一份测试台两边都能跑。
+
+  验证点（scripts/next-inplace-verify.mjs / scripts/mumu-next.mjs）：
+    点「下一集」→ 取回 ep2.html → 解析出 bb720.mp4 → 在当前播放器换源，
+    地址栏不变、页面不重载、标题变成「第 2 集」，再点一次能接着拿到第 3 集。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>测试剧 第1集 · Via Video Player</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 16px; color: #222; }
+  h1 { font-size: 17px; }
+  p { font-size: 12px; color: #666; line-height: 1.6; }
+  #eps a { display: inline-block; margin: 0 6px 6px 0; padding: 6px 10px; font-size: 12px;
+      color: #245; background: #eef3ff; border: 1px solid #ccd8f5; border-radius: 8px; text-decoration: none; }
+  video { width: 320px; max-width: 100%; background: #000; }
+</style>
+</head>
+<body>
+<h1>测试剧 第1集</h1>
+<p>三集各是一个独立页面（跨页选集），片源写在各自 HTML 里。当前集 = 第 1 集。</p>
+<div id="eps"></div>
+<video controls preload="metadata" src="/e2e/media/bb1080.mp4"></video>
+<script>
+(function () {
+    var box = document.getElementById('eps');
+    for (var i = 1; i <= 3; i++) {
+        var a = document.createElement('a');
+        a.href = 'ep' + i + '.html?vvdebug=1';   // 带上当前 query，当前集才能靠 href 精确匹配
+        a.textContent = '第' + i + '集';
+        box.appendChild(a);
+    }
+})();
+</script>
+</body>
+</html>

@@ -77,6 +77,7 @@ git checkout -- e2e/bench-mp4.png e2e/bench-hls.png e2e/load-pct.png e2e/load-in
 | --- | --- | --- |
 | 自动播放拦截 / 手势窗 | `mumu-aplate` | 手势记账与 1.2s 窗口只有真实 WebView 的点击链路能验；放行分支要求起播紧跟手势，桌面测不准时序 |
 | 选集识别 / 网格 / 切集 | `mumu-episodes` | 真实视口 360×520 下的浮层点击链路、`elementFromPoint` 命中 |
+| 「下一集」原地换集（跨页取片源） | `mumu-next` | 取页走 Via 的 `GM_xmlhttpRequest`（桌面是 `fetch`），Referer / CORS 行为不同；换集后「有没有跳页」只有真实 WebView 说得清 |
 | 页内小窗 / 导出浮层 / 置顶巡检 | `mumu-pip-share` | WebView 110 不支持系统画中画，只能验降级路径；2.5s 巡检要真实点击才复现 |
 | 画质档位 / ABR / 不封顶 | `mumu-quality` | 真机 hls 实例的 `autoLevelCapping` 与配置对象只有运行时能读 |
 | 慢网判据 / 看门狗 / 假活源 | `mumu-slow` | 真机首字节更晚、分片解码更慢、`networkState` 会抖 |
@@ -94,6 +95,7 @@ git checkout -- e2e/bench-mp4.png e2e/bench-hls.png e2e/load-pct.png e2e/load-in
 
 ```bash
 node scripts/mumu-episodes.mjs      # 35 项
+node scripts/mumu-next.mjs          # 「下一集」原地换集（跨页取片源、不跳页）；自带换版，NO_DEPLOY=1 可跳过
 node scripts/mumu-pip-share.mjs     # 40 项
 node scripts/mumu-loading.mjs       # 6 场景；ONLY=poster-eta 可只跑单个
 node scripts/mumu-slow.mjs          # 5 场景约 190s；SCENARIOS=steady,dead 可只跑指定

@@ -280,6 +280,10 @@ try {
             if (A) { A.item.url = location.origin + '/e2e/ep2.mp4'; A.url = A.item.url; }
         } catch (e0) {}
         try { window.__vv.disarmWatchdog(); } catch (e0b) {}
+        // 上一段点「嗅探直链」第 2 集时留下了原地换集的当前集（VV._curEp = 2）。
+        // 这一段模拟的是「随机 ID 页新开播放器」，那种场景下它本来就不存在，先清掉，
+        // 否则选集表会按 _curEp 直接给出第 3 集，走不到媒体换源那条兜底。
+        try { window.__vv.VV._curEp = null; } catch (e0c) {}
         try { window.__vv.epScan(true); } catch (e) {}
         try { window.__vv.findNext(); } catch (e2) {}
         setTimeout(() => {

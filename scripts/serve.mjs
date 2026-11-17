@@ -90,6 +90,8 @@ http.createServer(async (req, res) => {
     if (/^\/e2e\/seekbuf-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/seekbuf-android.html';
     // 连播 / 选集跳页自动续播真机测试台同理（页面自己按 part 跳页，整条 run 共用一个别名）
     if (/^\/e2e\/autonext-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/autonext-android.html';
+    // 「下一集」原地换集真机测试台同理
+    if (/^\/e2e\/nextpage-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/nextpage-android.html';
     // 字幕真机测试台同理
     if (/^\/e2e\/subs-android-[A-Za-z0-9._-]+\.html$/.test(pathname)) pathname = '/e2e/subs-android.html';
     // OPFS 播放缓存真机测试台同理

@@ -1,5 +1,10 @@
-function openPlayer(item) {
+function openPlayer(item, opts) {
     if (!item || !item.url) { vvToast('无效视频'); return; }
+    // opts.epNum / opts.epTitle：由「下一集」和选集原地换集传进来的集号与集名。
+    // 原地换集时 location 和页面 DOM 都还停在原来那一集，没有任何东西会自己更新，
+    // 标题栏与选集面板的当前集高亮只能靠这两个值。不传 = 普通打开，清掉旧集号。
+    var epNum = (opts && opts.epNum >= 0) ? opts.epNum : 0;
+    var epTitle = (opts && opts.epTitle) || '';
     vvEnsureStyle();
     // 释放自检用的计数：真机上反复开关时，靠这对数字判断有没有越开越多
     VV._openCount = (VV._openCount || 0) + 1;
@@ -23,6 +28,8 @@ function openPlayer(item) {
         item: item,
         url: item.url,
         key: vvVideoKey(item.url),
+        epNum: epNum,
+        epTitle: epTitle,
         hls: null,
         speed: parseFloat(VV.cfg.speed) || 1,
         // 老数据里可能是 0（旧版手势滑到底直接存 0），当成正常的 1 处理
@@ -35,6 +42,9 @@ function openPlayer(item) {
         qAutoHeight: 0,
         nextItem: null,
         nextPage: null,
+        // 下一集的完整描述（kind / num / href / el）：点「下一集」时先看它，
+        // 只有 kind='page' 才需要去取那一页的片源，num 用来同步标题和选集高亮
+        nextEp: null,
         resumeInfo: null,
         skipS: 0,
         skipE: 0,
@@ -72,7 +82,9 @@ function openPlayer(item) {
     try { VID.playbackRate = VV.active.speed; } catch (eS) {}
     // 抢占播放权：同一时间只允许一个页面拉流，避免多个 m3u8 页面把解码器吃光
     vvLeaseStart();
-    vvSetTitle(vvShortName(item, 0));
+    // 原地换集的"当前集"只在这里落账：URL / 页面 DOM 都不会跟着变
+    VV._curEp = epNum ? { num: epNum, title: epTitle } : null;
+    vvSetTitle(epNum ? vvEpTitleText(epNum, epTitle) : vvShortName(item, 0));
     try { vvUpdateSpeedChip(); } catch (eChip) {}
     vvHideSheet();
     VV._endHandled = false;
@@ -523,7 +535,10 @@ function vvEnsurePlayerRoot() {
         if (a === 'retry') {
             vvHideErr();
             try {
-                if (VV.active && VV.active.item) openPlayer(VV.active.item);
+                // 重试是同一个片源再来一次：集号要一起带回去，否则标题栏会退回文件名
+                if (VV.active && VV.active.item) {
+                    openPlayer(VV.active.item, { epNum: VV.active.epNum, epTitle: VV.active.epTitle });
+                }
             } catch (eR) {}
         } else if (a === 'ext') {
             try { if (VV.active) vvOpenExternal(VV.active.item, VV.active.hls); } catch (eE) {}
@@ -2357,6 +2372,9 @@ function closePlayer() {
     try { if (vvG.progDrag) { vvG.progDrag = false; vvG.mode = 'none'; vvG.gtgt = null; } } catch (eG) {}
     VV.playerActive = false;
     VV.active = null;
+    // 原地换集留下的"当前集"必须随播放器一起清掉：下次从页面重新打开播放器时，
+    // 高亮该由页面自己决定，不能还指着上一轮换到的那一集
+    VV._curEp = null;
     // 小窗状态跟着播放器一起退场，否则下次开播放器还带着 .mini 的残留尺寸
     VV._mini = false;
     MINIDRAG = null;

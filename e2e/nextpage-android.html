@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<!-- 「下一集」原地换集 真机测试台（MuMu + Via）
+     桌面版是 e2e/nextpage/ep1.html（同一套片源、同一份逻辑），这里多的是自驱动断言与上报：
+     Via 里没有 puppeteer，页面自己点按钮、自己判，POST /__report 回本地服务由驱动汇总。
+
+     本页扮演「第 1 集」：
+       · 页面标题带「第1集」，当前集靠标题认（页面地址是带版本号的别名，和选集模板不同）
+       · 三条剧集链接指向 nextpage/ep1~3.html（跨页选集，模板一致）
+       · 自己的片源是 bb1080.mp4；ep2 页面里是 bb720.mp4、ep3 页面里是 flower.mp4
+
+     判据：点「下一集」后地址不变、播放器没关、片源换成 bb720、标题变第 2 集、确实在播；
+     再点一次能走到第 3 集。整条链路不许出现页面导航。 -->
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>测试剧 第1集</title>
+<style>
+  body { margin: 0; padding: 10px; font: 13px/1.6 sans-serif; background: #111; color: #eee; }
+  #eps a { display: inline-block; margin: 5px 6px 5px 0; padding: 6px 12px; background: #333; color: #eee; text-decoration: none; }
+  video { width: 300px; max-width: 100%; background: #000; }
+  pre { font-size: 11px; color: #9c9; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h3>「下一集」原地换集 真机测试台</h3>
+<div id="eps"></div>
+<video controls preload="metadata" src="/e2e/media/bb1080.mp4"></video>
+<pre id="log"></pre>
+<script>
+(function () {
+  'use strict';
+  var qs = {};
+  location.search.slice(1).split('&').forEach(function (kv) {
+    var p = kv.split('='); qs[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+  });
+  var RUN = qs.run || ('r' + Date.now());
+  var HOST = location.origin;
+  var pass = 0, fail = 0;
+
+  (function buildLinks() {
+    var box = document.getElementById('eps');
+    for (var n = 1; n <= 3; n++) {
+      var a = document.createElement('a');
+      a.textContent = '第' + n + '集';
+      a.href = HOST + '/e2e/nextpage/ep' + n + '.html?vvdebug=1';
+      box.appendChild(a);
+    }
+  })();
+
+  function send(row) { row.run = RUN; try { fetch('/__report', { method: 'POST', body: JSON.stringify(row) }); } catch (e) {} }
+  function log(s) { document.getElementById('log').textContent += s + '\n'; }
+  function ok(name, cond, detail) {
+    if (cond) pass++; else fail++;
+    log((cond ? 'ok   - ' : 'FAIL - ') + name + (detail !== undefined ? '  [' + detail + ']' : ''));
+    send({ tag: 'ok', name: name, pass: !!cond, detail: String(detail === undefined ? '' : detail) });
+  }
+  function fatal(msg) {
+    send({ tag: 'fatal', msg: msg });
+    send({ tag: 'done', pass: pass, fail: fail + 1 });
+    log('FATAL: ' + msg);
+  }
+  function wait(ms) { return new Promise(function (res) { setTimeout(res, ms); }); }
+  function vv() { return window.__vv || null; }
+  function pv() { return document.querySelector('.vv-player-root video'); }
+
+  async function waitVV(ms) {
+    var dl = Date.now() + (ms || 12000);
+    while (Date.now() < dl) {
+      var w = vv();
+      if (w && w.VV) {
+        try {
+          if (!w.VV.items.length) {
+            w.VV.items.push({ url: HOST + '/e2e/media/bb1080.mp4', type: 'MP4', name: 'bb1080', source: 'test' });
+          }
+        } catch (e) {}
+        return w;
+      }
+      await wait(150);
+    }
+    return null;
+  }
+  async function waitPlayer(ms) {
+    var dl = Date.now() + (ms || 12000);
+    while (Date.now() < dl) {
+      var v = pv();
+      if (v && vv() && vv().VV && vv().VV.playerActive) return v;
+      await wait(250);
+    }
+    return null;
+  }
+  async function waitUntil(fn, ms) {
+    var dl = Date.now() + (ms || 12000);
+    while (Date.now() < dl) {
+      var r = null;
+      try { r = fn(); } catch (e) {}
+      if (r) return r;
+      await wait(250);
+    }
+    return null;
+  }
+  function snapshot() {
+    var V = vv().VV, A = V.active || {};
+    var t = document.getElementById('vv-title');
+    return {
+      href: location.href,
+      active: V.playerActive,
+      url: A.item ? A.item.url : '',
+      epNum: A.epNum === undefined ? -1 : A.epNum,
+      curEp: V._curEp ? V._curEp.num : -1,
+      title: t ? t.textContent : '',
+      busy: !!A._nextBusy
+    };
+  }
+
+  send({ tag: 'boot', href: location.pathname + location.search, expect: qs.expect || '' });
+
+  async function main() {
+    var w = await waitVV();
+    if (!w) { fatal('__vv 没挂出来（脚本没注入或版本没换）'); return; }
+    var env = vv().VV;
+    send({ tag: 'env', version: env.version || '?', build: env.build || '', vw: window.innerWidth, vh: window.innerHeight,
+      dpr: window.devicePixelRatio, ua: navigator.userAgent });
+
+    var scan = w.epScan(true);
+    ok('选集表认出 3 集', scan.page.length === 3, String(scan.page.length));
+    ok('当前集 = 第 1 集（靠标题认）', scan.current.page === 1, String(scan.current.page));
+
+    try { document.body.click(); } catch (e0) {}
+    w.open({ url: HOST + '/e2e/media/bb1080.mp4', name: 'bb1080', type: 'MP4' });
+    var v = await waitPlayer();
+    ok('播放器已打开', !!v);
+    if (!v) { fatal('播放器没开起来'); return; }
+    var playing = await waitUntil(function () { return !pv().paused && pv().currentTime > 0.2; }, 8000);
+    if (!playing) {
+      // WebView 的自动播放策略可能挡了首帧：替用户点一下播放键再判
+      try { document.getElementById('vv-play-btn').click(); } catch (e1) {}
+      playing = await waitUntil(function () { return !pv().paused && pv().currentTime > 0.2; }, 6000);
+    }
+    ok('第 1 集在播', !!playing, pv() ? 'paused=' + pv().paused + ' t=' + pv().currentTime.toFixed(2) : 'no video');
+
+    var nx = await waitUntil(function () {
+      var A = vv().VV.active || {};
+      return /nextpage\/ep2\.html/.test(A.nextPage || '') ? { nextPage: A.nextPage, epNum: A.nextEp ? A.nextEp.num : -1 } : null;
+    }, 12000);
+    ok('findNext 认出下一集是第 2 集那一页', !!nx, nx ? nx.nextPage : 'timeout');
+    if (!nx) { fatal('没认出下一集，后面的原地换集无从验起'); return; }
+    ok('nextEp 带上了集号', nx.epNum === 2, String(nx.epNum));
+
+    var before = snapshot();
+    await wait(200);
+    document.getElementById('vv-next-btn').click();
+
+    var hit = await waitUntil(function () {
+      var s = snapshot();
+      return (/\/e2e\/media\/bb720\.mp4$/.test(s.url) && s.busy === false) ? s : null;
+    }, 20000);
+    ok('原地换到下一集片源（bb720）', !!hit, hit ? hit.url : 'timeout');
+    if (!hit) { fatal('点了「下一集」没换到第 2 集片源'); return; }
+
+    ok('地址栏没变（没有页面导航）', hit.href === before.href, before.href + ' → ' + hit.href);
+    ok('播放器一直开着', hit.active === true, 'playerActive=' + hit.active);
+    ok('标题同步成第 2 集', /第\s*2\s*集/.test(hit.title), hit.title);
+    ok('当前集状态同步成 2', hit.curEp === 2, String(hit.curEp));
+
+    var play2 = await waitUntil(function () { return !pv().paused && pv().currentTime > 0.2; }, 10000);
+    ok('换集后自动接着播', !!play2, pv() ? 'paused=' + pv().paused + ' t=' + pv().currentTime.toFixed(2) : 'no video');
+    ok('播放器里是第 2 集的片源', /bb720\.mp4/.test(pv() ? (pv().currentSrc || pv().src || '') : ''),
+      pv() ? (pv().currentSrc || pv().src || '') : 'no video');
+
+    var stored = null;
+    try { stored = w.get('autoNextLast', null); } catch (e3) {}
+    ok('没写「跳页续播」标记（没走跳页那条路）', stored === null, JSON.stringify(stored));
+
+    var panel = (function () {
+      w.epOpen();
+      var box = document.getElementById('vv-ep-wrap');
+      var on = box ? box.querySelector('.vv-ep-cell.on') : null;
+      var r = { onNum: on ? on.getAttribute('data-num') : '' };
+      w.epClose();
+      return r;
+    })();
+    ok('选集面板高亮第 2 集', panel.onNum === '2', 'on=' + panel.onNum);
+
+    // ---- 再点一次：连续往下走 ----
+    var nx3 = await waitUntil(function () {
+      var A = vv().VV.active || {};
+      return /nextpage\/ep3\.html/.test(A.nextPage || '') ? { nextPage: A.nextPage } : null;
+    }, 12000);
+    ok('换集后 findNext 接着认出第 3 集', !!nx3, nx3 ? nx3.nextPage : 'timeout');
+    if (!nx3) { send({ tag: 'done', pass: pass, fail: fail }); return; }
+
+    var before2 = snapshot();
+    document.getElementById('vv-next-btn').click();
+    var hit2 = await waitUntil(function () {
+      var s = snapshot();
+      return /\/e2e\/flower\.mp4$/.test(s.url) ? s : null;
+    }, 20000);
+    ok('连续第二次换集也换了片源', !!hit2, hit2 ? hit2.url : 'timeout');
+    if (hit2) {
+      ok('第二次换集同样没跳页', hit2.href === before2.href && hit2.active === true, hit2.href);
+      ok('第二次换集标题变成第 3 集', /第\s*3\s*集/.test(hit2.title) && hit2.epNum === 3,
+        'ep=' + hit2.epNum + ' / ' + hit2.title);
+    }
+    send({ tag: 'done', pass: pass, fail: fail });
+    log('done: ' + pass + ' passed, ' + fail + ' failed');
+  }
+
+  window.addEventListener('error', function (e) {
+    send({ tag: 'diag', phase: 'pageErr', msg: String(e.message || e) });
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    send({ tag: 'diag', phase: 'unhandled',
+      msg: String((e && e.reason && (e.reason.stack || e.reason.message)) || e.reason || e) });
+  });
+  async function guarded() {
+    try { await main(); } catch (e) { fatal('main 异常: ' + String((e && (e.stack || e.message)) || e)); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', guarded);
+  else guarded();
+})();
+</script>
+</body>
+</html>

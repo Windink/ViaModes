@@ -2,8 +2,8 @@
 // @name         Via 视频嗅探播放器
 // @name:en      Via Video Sniffer & Player
 // @namespace    viamodes.local
-// @version      1.0.0
-// @vvbuild      2026-11-11 10:04
+// @version      1.0.3
+// @vvbuild      2026-11-17 12:34
 // @author       ViaModes
 // @description  网页视频嗅探 + 全屏播放器：网页铺满（把站点播放器放大到可视区）、悬浮角标、mp4/m3u8 播放、手势调节音量亮度与快进、倍速、画质/音轨切换、进度记忆、锁屏、片头片尾、连播、调 Via 下载
 // @description:en  Sniff web videos and play with a fullscreen player; page-fill mode enlarges the site's own player to the viewport (gestures, speed, resume, m3u8, next-episode, download)
@@ -23,7 +23,7 @@
 // ==/UserScript==
 (function(){
 "use strict";
-var VV_VERSION = "1.0.0", VV_BUILD = "2026-11-11 10:04";
+var VV_VERSION = "1.0.3", VV_BUILD = "2026-11-17 12:34";
 var VV_HLS_URLS = ["https://fastly.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js","https://unpkg.com/hls.js@1/dist/hls.min.js"];
 /*! hls.js 1.7.3 | Copyright (c) 2017 Dailymotion (http://www.dailymotion.com) | Licensed under the Apache License, Version 2.0 (http://www.apache.org/licenses/LICENSE-2.0) | https://github.com/video-dev/hls.js | 本副本为官方 dist/hls.min.js 原样内联，未修改；许可证全文见 vendor/LICENSE-hlsjs 与 vendor/LICENSE-Apache-2.0 */
 (function(){try{!function e(t){var r,i;r=this,i=function(){"use strict";function r(e,t){(null==t||t>e.length)&&(t=e.length);for(var r=0,i=Array(t);r<t;r++)i[r]=e[r];return i}function i(e,t,r,i,n,a,s){try{var o=e[a](s),l=o.value}catch(e){return void r(e)}o.done?t(l):Promise.resolve(l).then(i,n)}function n(e,t){for(var r=0;r<t.length;r++){var i=t[r];i.enumerable=i.enumerable||!1,i.configurable=!0,"value"in i&&(i.writable=!0),Object.defineProperty(e,y(i.key),i)}}function a(e,t,r){return t&&n(e.prototype,t),r&&n(e,r),Object.defineProperty(e,"prototype",{writable:!1}),e}function s(e,t){var i="undefined"!=typeof Symbol&&e[Symbol.iterator]||e["@@iterator"];if(i)return(i=i.call(e)).next.bind(i);if(Array.isArray(e)||(i=function(e,t){if(e){if("string"==typeof e)return r(e,t);var i={}.toString.call(e).slice(8,-1);return"Object"===i&&e.constructor&&(i=e.constructor.name),"Map"===i||"Set"===i?Array.from(e):"Arguments"===i||/^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(i)?r(e,t):void 0}}(e))||t){i&&(e=i);var n=0;return function(){return n>=e.length?{done:!0}:{done:!1,value:e[n++]}}}throw new TypeError("Invalid attempt to iterate non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.")}function o(e,t,r){return(t=y(t))in e?Object.defineProperty(e,t,{value:r,enumerable:!0,configurable:!0,writable:!0}):e[t]=r,e}function l(){return l=Object.assign?Object.assign.bind():function(e){for(var t=1;t<arguments.length;t++){var r=arguments[t];for(var i in r)({}).hasOwnProperty.call(r,i)&&(e[i]=r[i])}return e},l.apply(null,arguments)}function u(e){return u=Object.setPrototypeOf?Object.getPrototypeOf.bind():function(e){return e.__proto__||Object.getPrototypeOf(e)},u(e)}function d(e,t){e.prototype=Object.create(t.prototype),e.prototype.constructor=e,p(e,t)}function h(){try{var e=!Boolean.prototype.valueOf.call(Reflect.construct(Boolean,[],(function(){})))}catch(e){}return(h=function(){return!!e})()}function f(e,t){var r=Object.keys(e);if(Object.getOwnPropertySymbols){var i=Object.getOwnPropertySymbols(e);t&&(i=i.filter((function(t){return Object.getOwnPropertyDescriptor(e,t).enumerable}))),r.push.apply(r,i)}return r}function c(e){for(var t=1;t<arguments.length;t++){var r=null!=arguments[t]?arguments[t]:{};t%2?f(Object(r),!0).forEach((function(t){o(e,t,r[t])})):Object.getOwnPropertyDescriptors?Object.defineProperties(e,Object.getOwnPropertyDescriptors(r)):f(Object(r)).forEach((function(t){Object.defineProperty(e,t,Object.getOwnPropertyDescriptor(r,t))}))}return e}function g(e,t){if(null==e)return{};var r={};for(var i in e)if({}.hasOwnProperty.call(e,i)){if(-1!==t.indexOf(i))continue;r[i]=e[i]}return r}function v(){
@@ -2475,8 +2475,13 @@ function vvSafeName(name) {
     if (s.length > 60) s = s.slice(0, 60);
     return s || ('video_' + Date.now());
 }
-function openPlayer(item) {
+function openPlayer(item, opts) {
     if (!item || !item.url) { vvToast('无效视频'); return; }
+    // opts.epNum / opts.epTitle：由「下一集」和选集原地换集传进来的集号与集名。
+    // 原地换集时 location 和页面 DOM 都还停在原来那一集，没有任何东西会自己更新，
+    // 标题栏与选集面板的当前集高亮只能靠这两个值。不传 = 普通打开，清掉旧集号。
+    var epNum = (opts && opts.epNum >= 0) ? opts.epNum : 0;
+    var epTitle = (opts && opts.epTitle) || '';
     vvEnsureStyle();
     // 释放自检用的计数：真机上反复开关时，靠这对数字判断有没有越开越多
     VV._openCount = (VV._openCount || 0) + 1;
@@ -2500,6 +2505,8 @@ function openPlayer(item) {
         item: item,
         url: item.url,
         key: vvVideoKey(item.url),
+        epNum: epNum,
+        epTitle: epTitle,
         hls: null,
         speed: parseFloat(VV.cfg.speed) || 1,
         // 老数据里可能是 0（旧版手势滑到底直接存 0），当成正常的 1 处理
@@ -2512,6 +2519,9 @@ function openPlayer(item) {
         qAutoHeight: 0,
         nextItem: null,
         nextPage: null,
+        // 下一集的完整描述（kind / num / href / el）：点「下一集」时先看它，
+        // 只有 kind='page' 才需要去取那一页的片源，num 用来同步标题和选集高亮
+        nextEp: null,
         resumeInfo: null,
         skipS: 0,
         skipE: 0,
@@ -2549,7 +2559,9 @@ function openPlayer(item) {
     try { VID.playbackRate = VV.active.speed; } catch (eS) {}
     // 抢占播放权：同一时间只允许一个页面拉流，避免多个 m3u8 页面把解码器吃光
     vvLeaseStart();
-    vvSetTitle(vvShortName(item, 0));
+    // 原地换集的"当前集"只在这里落账：URL / 页面 DOM 都不会跟着变
+    VV._curEp = epNum ? { num: epNum, title: epTitle } : null;
+    vvSetTitle(epNum ? vvEpTitleText(epNum, epTitle) : vvShortName(item, 0));
     try { vvUpdateSpeedChip(); } catch (eChip) {}
     vvHideSheet();
     VV._endHandled = false;
@@ -3000,7 +3012,10 @@ function vvEnsurePlayerRoot() {
         if (a === 'retry') {
             vvHideErr();
             try {
-                if (VV.active && VV.active.item) openPlayer(VV.active.item);
+                // 重试是同一个片源再来一次：集号要一起带回去，否则标题栏会退回文件名
+                if (VV.active && VV.active.item) {
+                    openPlayer(VV.active.item, { epNum: VV.active.epNum, epTitle: VV.active.epTitle });
+                }
             } catch (eR) {}
         } else if (a === 'ext') {
             try { if (VV.active) vvOpenExternal(VV.active.item, VV.active.hls); } catch (eE) {}
@@ -4834,6 +4849,9 @@ function closePlayer() {
     try { if (vvG.progDrag) { vvG.progDrag = false; vvG.mode = 'none'; vvG.gtgt = null; } } catch (eG) {}
     VV.playerActive = false;
     VV.active = null;
+    // 原地换集留下的"当前集"必须随播放器一起清掉：下次从页面重新打开播放器时，
+    // 高亮该由页面自己决定，不能还指着上一轮换到的那一集
+    VV._curEp = null;
     // 小窗状态跟着播放器一起退场，否则下次开播放器还带着 .mini 的残留尺寸
     VV._mini = false;
     MINIDRAG = null;
@@ -5555,8 +5573,10 @@ function vvOnEnded() {
         if (VV.cfg.autoplayNext && VV.active && VV.active.nextItem) {
             vvToast('连播下一集...');
             var nx = VV.active.nextItem;
+            var nxNum = (VV.active.nextEp && VV.active.nextEp.num >= 0) ? VV.active.nextEp.num : -1;
             setTimeout(function () {
-                if (VV.playerActive) openPlayer(nx);
+                // 集号一起带过去：标题栏和选集高亮靠它，不带就会退回文件名
+                if (VV.playerActive) vvNextPlay(nx, nxNum, '');
             }, 600);
             return;
         }
@@ -5635,25 +5655,41 @@ function vvFindNext() {
         if (!VV.active) return;
         // 选集表优先：随机 ID 剧集页每集地址没有集号，下面的「媒体数字 +1」「页面链接 ±1」
         // 都认不出下一集；选集网格本来就能把这一页的集列出来，表里「当前集 + 1」才是
-        // 唯一可靠来源。本页剧集 → 记 nextPage 跳页（复用 vvNavNext 的 autoNextLast
-        // 通道，新页面自动续播）；嗅探分集 → 直接换源重开，不跳页。
+        // 唯一可靠来源。本页剧集 → 只记 nextPage（点「下一集」时由 vvNextFromPage 取回
+        // 那一页的片源，不再整页跳走）；嗅探分集 → 直接换源重开，不跳页。
         var eps = null;
-        try { eps = vvEpisodesScan(false); } catch (eE) { eps = null; }
-        if (eps && eps.current) {
+        // 原地换集之后位置没变，800ms 缓存里的 current 是换集之前的，必须强制重算
+        var curO = (VV._curEp && VV._curEp.num >= 0) ? VV._curEp.num : -1;
+        try { eps = vvEpisodesScan(curO >= 0); } catch (eE) { eps = null; }
+        if (eps && (eps.current || curO >= 0)) {
             var epList = null, epCur = -1;
-            if (eps.current.page >= 0 && eps.page.length) { epList = eps.page; epCur = eps.current.page; }
-            else if (eps.current.media >= 0 && eps.media.length) { epList = eps.media; epCur = eps.current.media; }
+            // 当前集以播放器实际在播的那一集为准：URL / DOM 选中态都还停在原来那一集
+            if (curO >= 0 && eps.page.length) {
+                epList = eps.page;
+                var hitP = vvEpNumInCands(curO, eps.page);
+                epCur = hitP >= 0 ? hitP : curO;
+            } else if (curO >= 0 && eps.media.length) {
+                epList = eps.media;
+                var hitM = vvEpNumInCands(curO, eps.media);
+                epCur = hitM >= 0 ? hitM : curO;
+            } else if (eps.current && eps.current.page >= 0 && eps.page.length) {
+                epList = eps.page; epCur = eps.current.page;
+            } else if (eps.current && eps.current.media >= 0 && eps.media.length) {
+                epList = eps.media; epCur = eps.current.media;
+            }
             if (epList) {
                 for (var ei = 0; ei < epList.length; ei++) {
                     if (epList[ei].num !== epCur + 1) continue;
                     var nxEp = epList[ei];
                     if (nxEp.kind === 'page' && nxEp.href) {
                         VV.active.nextPage = nxEp.href;
+                        VV.active.nextEp = nxEp;
                         vvShowNext(true);
                         return;
                     }
                     if (nxEp.kind === 'media' && nxEp.item) {
                         VV.active.nextItem = { url: nxEp.item.url, type: nxEp.item.type, name: nxEp.item.name };
+                        VV.active.nextEp = nxEp;
                         vvShowNext(true);
                         return;
                     }
@@ -5666,7 +5702,7 @@ function vvFindNext() {
         if (mi && parseInt(mi.num, 10) > 0 && mi.num < 900) {
             for (var k = 1; k <= 2; k++) {
                 var nu = vvBumpNum(mi, k);
-                if (nu) cands.push({ url: nu, via: 'media' });
+                if (nu) cands.push({ url: nu, via: 'media', num: mi.num + k });
             }
         }
         try {
@@ -5682,7 +5718,7 @@ function vvFindNext() {
                     try { full = new URL(l, location.href).href; } catch (e2) {}
                     var li = full ? vvNumInfo(full) : null;
                     if (li && Math.abs(li.num - pi.num) === 1 && vvTemplize(full.split('#')[0]) === pageTem) {
-                        cands.push({ url: full, via: 'page' });
+                        cands.push({ url: full, via: 'page', num: li.num, el: links[i] });
                         break;
                     }
                 }
@@ -5692,12 +5728,14 @@ function vvFindNext() {
         var cand = cands[0];
         if (cand.via === 'page') {
             VV.active.nextPage = cand.url;
+            VV.active.nextEp = { kind: 'page', num: cand.num, label: '', href: cand.url, el: cand.el || null };
             vvShowNext(true);
             return;
         }
         vvProbeUrl(cand.url, VV.active.item.type === 'HLS', function (ok) {
             if (ok && VV.active) {
                 VV.active.nextItem = { url: cand.url, type: VV.active.item.type, name: VV.active.item.name };
+                VV.active.nextEp = { kind: 'media', num: cand.num, label: '', href: cand.url };
                 vvShowNext(true);
             }
         });
@@ -5712,12 +5750,245 @@ function vvShowNext(on) {
     } catch (e) {}
 }
 
+// ---------------------------------------------------------------
+// 「下一集」：全程留在当前页面
+//
+// 以前这里只有两条路：嗅到下一集直链就换源，否则 location.href 整页跳走。
+// 跳页等于把站点重新加载一遍（广告、首屏脚本、播放器重建），用户只是想接着看，
+// 却被打断好几秒，回来还得重新点播放。现在多一条主路：
+//
+//   nextItem  → 直接换源（同模板直链，最省事）
+//   同文档选集 → 交给站点切（锚点 / JS 换片），再重新嗅探新片源
+//   跨页选集 → GM_xhr 把那一页 HTML 取回来，解析 m3u8/mp4 再换源
+//
+// 三条路都不触发页面导航，标题与当前集数跟着换集一起更新。
+// ---------------------------------------------------------------
 function vvGoNext() {
     try {
-        if (VV.active && VV.active.nextItem) { openPlayer(VV.active.nextItem); return; }
-        if (VV.active && VV.active.nextPage) { vvNavNext(); return; }
+        if (!VV.active) { vvToast('没有检测到下一集'); return; }
+        // 连点会叠加多次换源/取页请求，后一次把前一次的播放状态顶掉
+        if (VV.active._nextBusy) return;
+        var ep = VV.active.nextEp || null;
+        if (VV.active.nextItem) {
+            vvNextPlay(VV.active.nextItem, ep && ep.num >= 0 ? ep.num : -1, '');
+            return;
+        }
+        if (VV.active.nextPage) { vvNextFromPage(VV.active.nextPage, ep); return; }
         vvToast('没有检测到下一集');
     } catch (e) {}
+}
+
+// 集号优先用选集表给的（跨页地址里往往没有集号），拿不到才从媒体文件名里读。
+// 标题不传「第N集」这种格子文本：拼起来会变成「第 6 集 · 第6集」。
+function vvNextPlay(item, num, title) {
+    try {
+        var n = (num >= 0) ? num : -1;
+        if (n < 0) { var mn = vvEpMediaNum(item && item.url); n = (mn === null || mn === undefined) ? -1 : mn; }
+        openPlayer(item, { epNum: n >= 0 ? n : 0, epTitle: title || '' });
+        vvToast(n >= 0 ? ('已切到第 ' + n + ' 集') : '已切到下一集');
+    } catch (e) {}
+}
+
+function vvNextFromPage(url, ep) {
+    try {
+        var here = location.href.split('#')[0];
+        var goBase = String(url).split('#')[0];
+        // 1) 同文档选集（#ep=6 / #/play/6）：站点自己会换片，只要把地址交过去，
+        //    再重新嗅探它吐出来的新片源。hash 变化不会重载页面。
+        if (goBase === here && ep) { vvEpGoElement(ep, url); return; }
+        // 2) 站点用 JS 原地切集、只是没有可跳地址：替用户点一下那个元素
+        if (ep && ep.kind === 'el' && vvEpElAlive(ep.el)) { vvEpGoElement(ep, null); return; }
+        // 3) 跨页选集：取回那一页的 HTML 自己找片源。拿不到就如实说，绝不偷偷跳页
+        if (typeof GM_xmlhttpRequest !== 'function' && typeof fetch !== 'function') {
+            vvToast('当前环境取不到下一集地址，可在「选集」里换集', true);
+            return;
+        }
+        VV.active._nextBusy = true;
+        vvToast('正在取下一集…');
+        vvFetchNextMedia(url, function (hit, info) {
+            try { if (VV.active) VV.active._nextBusy = false; } catch (e0) {}
+            if (!VV.active) return;   // 取页途中被关掉了
+            if (!hit) {
+                vvToast('没能取到下一集的视频地址，可在「选集」里换集', true);
+                return;
+            }
+            var num = (ep && ep.num >= 0) ? ep.num : -1;
+            var title = (info && info.title) || '';
+            vvNextPlay({ url: hit.url, type: hit.type, name: title }, num, title);
+        });
+    } catch (e) {}
+}
+
+function vvEpElAlive(el) {
+    try { return !!(el && document.contains && document.contains(el)); } catch (e) { return false; }
+}
+
+// 取一页 HTML → 解析出媒体地址 → 逐个探测可用性。
+// 页面里没有直接给地址时，再往下钻一层 iframe（大量站点把播放器单独放在播放页里）。
+function vvFetchNextMedia(pageUrl, cb) {
+    var done = false, timer = 0;
+    function fin(hit, info) {
+        if (done) return;
+        done = true;
+        try { clearTimeout(timer); } catch (e) {}
+        try { cb(hit, info || {}); } catch (e2) {}
+    }
+    // 整条链路给一个硬上限：取页 + 探测都慢时不能让按钮一直"正在取…"
+    timer = setTimeout(function () { fin(null, { err: 'timeout' }); }, 15000);
+    vvHttpGet(pageUrl, function (html) {
+        if (!html) { fin(null, { err: 'http' }); return; }
+        var info = vvNextPageInfo(html, pageUrl);
+        var list = vvMediaFromHtml(html, pageUrl);
+        if (list.length) { vvProbeMediaList(list, 0, function (hit) { fin(hit, info); }); return; }
+        var ifr = vvIframeFromHtml(html, pageUrl);
+        if (!ifr) { fin(null, info); return; }
+        vvHttpGet(ifr, function (h2) {
+            if (!h2) { fin(null, info); return; }
+            var info2 = vvNextPageInfo(h2, ifr);
+            if (info2.title) info = info2;
+            vvProbeMediaList(vvMediaFromHtml(h2, ifr), 0, function (hit) { fin(hit, info); });
+        });
+    });
+}
+
+// 取文本：优先脚本管理器（能带 Referer、不受 CORS 限制），退到 fetch 同源。
+function vvHttpGet(url, cb) {
+    var sent = false;
+    function fin(txt) { if (sent) return; sent = true; cb(txt || ''); }
+    try {
+        if (typeof GM_xmlhttpRequest === 'function') {
+            GM_xmlhttpRequest({
+                method: 'GET', url: url, timeout: 12000,
+                headers: { Referer: location.href },
+                onload: function (r) { fin(r.status >= 200 && r.status < 400 ? r.responseText : ''); },
+                onerror: function () { fin(''); },
+                ontimeout: function () { fin(''); }
+            });
+            return;
+        }
+    } catch (e) {}
+    try {
+        if (typeof fetch === 'function') {
+            fetch(url, { credentials: 'include', referrer: location.href })
+                .then(function (r) { return r.ok ? r.text() : ''; })
+                .then(fin).catch(function () { fin(''); });
+            return;
+        }
+    } catch (e2) {}
+    fin('');
+}
+
+// 页面标题 + 标题里的集号（跨页取回来后用来同步标题栏）
+function vvNextPageInfo(html, url) {
+    var out = { title: '', num: -1, url: String(url || '') };
+    try {
+        var m = /<title[^>]*>([\s\S]{0,400}?)<\/title>/i.exec(String(html || ''));
+        if (m) {
+            out.title = m[1].replace(/<[^>]*>/g, '')
+                .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&')
+                .replace(/\s+/g, ' ').trim().slice(0, 60);
+        }
+        var e = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回)/i.exec(out.title);
+        if (e) out.num = parseInt(e[1], 10);
+    } catch (er) {}
+    return out;
+}
+
+// 从 HTML 文本里捡媒体地址。站点写法极其随意：JSON 里的 \u002F、JS 字符串里的 \/、
+// HTML 实体 &amp;，还有相对路径，全都得先归一化再匹配。
+function vvMediaFromHtml(html, base) {
+    var out = [], seen = {};
+    var s;
+    try {
+        s = String(html || '')
+            .replace(/\\u002[fF]/g, '/')
+            .replace(/\\\//g, '/')
+            .replace(/&amp;/gi, '&');
+    } catch (e) { return out; }
+    function add(u) {
+        if (!u || seen[u] || vvMediaSkip(u)) return;
+        seen[u] = 1;
+        out.push({ url: u, type: /\.m3u8(?:$|\?)/i.test(u) ? 'HLS' : 'MP4' });
+    }
+    var m, rx = /(?:https?:)?\/\/[^\s"'<>(){}|\\^`]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>(){}|\\^`]*)?/gi;
+    while ((m = rx.exec(s)) !== null) {
+        var u = m[0];
+        if (u.indexOf('//') === 0) u = (/^https:/i.test(base || '') ? 'https:' : 'http:') + u;
+        add(u);
+    }
+    // 相对路径：src="/hls/1.m3u8"、'./v/2.mp4'
+    var rx2 = /["'(=:]((?:\.{0,2}\/)[^\s"'<>(){}|\\^`]+?\.(?:m3u8|mp4)(?:\?[^\s"'<>(){}|\\^`]*)?)/gi;
+    while ((m = rx2.exec(s)) !== null) {
+        try { add(new URL(m[1], base).href); } catch (e2) {}
+    }
+    // 清单排在前面：同一页既给 m3u8 又给一堆 mp4 时，那些 mp4 基本都是分片
+    out.sort(function (a, b) {
+        var wa = a.type === 'HLS' ? 0 : 1, wb = b.type === 'HLS' ? 0 : 1;
+        return wa - wb;
+    });
+    return out.slice(0, 6);
+}
+
+// 明确不像正片地址的一律扔掉：广告、埋点、HLS 的 init/分片、纯序号文件
+function vvMediaSkip(u) {
+    try {
+        if (!/^https?:/i.test(u)) return true;
+        var x = new URL(u);
+        var host = x.hostname || '', path = x.pathname || '';
+        if (/doubleclick|googlesyndication|google-analytics|adservice|adsystem/i.test(host)) return true;
+        if (/\/(?:ads?|advert|banner|promo)\//i.test(path)) return true;
+        var f = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+        if (/^(?:init|seg|segment|chunk|frag|fragment|part|index)[-_]?\d*\.mp4$/.test(f)) return true;
+        if (/^\d{1,5}\.mp4$/.test(f)) return true;
+        return false;
+    } catch (e) { return true; }
+}
+
+function vvIframeFromHtml(html, base) {
+    try {
+        var s = String(html || '').replace(/\\\//g, '/');
+        var rx = /<iframe[^>]+src\s*=\s*["']([^"']+)["']/gi, m, first = '';
+        while ((m = rx.exec(s)) !== null) {
+            var u = '';
+            try { u = new URL(m[1], base).href; } catch (e) { continue; }
+            if (!/^https?:/i.test(u)) continue;
+            if (/(?:play|player|embed|video|vod|iframe|m3u8|api)/i.test(u)) return u;
+            if (!first) first = u;
+        }
+        return first;
+    } catch (e) {}
+    return '';
+}
+
+// 逐个探测到第一个能用的地址为止（最多试 5 个，避免一串死链把按钮拖死）
+function vvProbeMediaList(list, i, cb) {
+    if (!list || i >= list.length || i >= 5) { cb(null); return; }
+    var it = list[i];
+    vvProbeUrl(it.url, it.type === 'HLS', function (ok) {
+        if (ok) { cb(it); return; }
+        vvProbeMediaList(list, i + 1, cb);
+    });
+}
+
+function vvEpTitleText(num, title) {
+    var t = String(title || '').replace(/\s+/g, ' ').trim();
+    // 选集格子的文本本身就是「第6集」，拼进标题会变成「第 6 集 · 第6集」
+    if (/^(?:第\s*)?\d{1,4}\s*(?:集|话|話|期|回)$/.test(t)) t = '';
+    if (!(num >= 0)) {
+        return t || vvRawPageTitle();
+    }
+    // 页面标题通常也带「第N集」（"剧名 第2集 - 站点"），留着会和前缀重复
+    if (t) {
+        t = t.replace(new RegExp('第\\s*' + num + '\\s*(?:集|话|話|期|回)', 'g'), '')
+            .replace(/^[\s·\-—|:：]+|[\s·\-—|:：]+$/g, '')
+            .replace(/\s{2,}/g, ' ').trim();
+    }
+    return '第 ' + num + ' 集' + (t ? ' · ' + t : '');
+}
+
+// 页面标题原文（vvPageTitle 已经过 vvEscape，再喂给 vvSetTitle 会双转义）
+function vvRawPageTitle() {
+    try { return String(document.title || '').replace(/\s+/g, ' ').trim().slice(0, 60); } catch (e) { return ''; }
 }
 
 function vvGetSheet() {
@@ -9562,30 +9833,39 @@ function vvEpCurrent(page, media) {
     var hereFull = location.href;
     var here = hereFull.split('#')[0];
     var res = { page: -1, media: -1 };
-    // 先比完整地址（带 #ep=3 的站内锚点式选集），再比去掉锚点的地址
-    for (var h = 0; h < page.length; h++) {
-        if (page[h].href && page[h].href === hereFull) { res.page = page[h].num; break; }
-    }
-    if (res.page < 0) {
-        for (var i = 0; i < page.length; i++) {
-            if (page[i].href && page[i].href.split('#')[0] === here) { res.page = page[i].num; break; }
+    // 播放器内原地换集（「下一集」/选集直链）之后，地址和 DOM 选中态都还停在原来那一集，
+    // 只有 VV._curEp 是准的：它由换集那一侧写、关播放器时清。
+    // 注意仍要确认这一集在这组候选里，否则整组认错时会把高亮钉在不存在的格子上。
+    var over = -1;
+    if (VV._curEp && VV._curEp.num >= 0) over = vvEpNumInCands(VV._curEp.num, page);
+    if (over >= 0) {
+        res.page = over;
+    } else {
+        // 先比完整地址（带 #ep=3 的站内锚点式选集），再比去掉锚点的地址
+        for (var h = 0; h < page.length; h++) {
+            if (page[h].href && page[h].href === hereFull) { res.page = page[h].num; break; }
         }
-    }
-    // 跨页面选集常见：每集一个随机 ID 地址，还会重定向，URL 里根本没有集号。
-    // 这时站点 DOM 上的选中态、以及标题里的「第 N 集」才是唯一可靠信号。
-    if (res.page < 0) {
-        for (var a = 0; a < page.length; a++) {
-            if (vvEpIsCurrentEl(page[a].el)) { res.page = page[a].num; break; }
+        if (res.page < 0) {
+            for (var i = 0; i < page.length; i++) {
+                if (page[i].href && page[i].href.split('#')[0] === here) { res.page = page[i].num; break; }
+            }
         }
+        // 跨页面选集常见：每集一个随机 ID 地址，还会重定向，URL 里根本没有集号。
+        // 这时站点 DOM 上的选中态、以及标题里的「第 N 集」才是唯一可靠信号。
+        if (res.page < 0) {
+            for (var a = 0; a < page.length; a++) {
+                if (vvEpIsCurrentEl(page[a].el)) { res.page = page[a].num; break; }
+            }
+        }
+        if (res.page < 0) {
+            // 「第 7 集」和「第7集」都要认，标题里有没有空格全看站点
+            var tm = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回|部)/i.exec(document.title || '');
+            if (tm) res.page = vvEpNumInCands(parseInt(tm[1], 10), page);
+        }
+        // URL 里的数字只是最后兜底，随机 ID / 重定向页面上它纯属噪声，
+        // 所以排在 DOM 和标题之后，且只认明确像集号的那几个位置。
+        if (res.page < 0) res.page = vvEpNumFromUrl(page);
     }
-    if (res.page < 0) {
-        // 「第 7 集」和「第7集」都要认，标题里有没有空格全看站点
-        var tm = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回|部)/i.exec(document.title || '');
-        if (tm) res.page = vvEpNumInCands(parseInt(tm[1], 10), page);
-    }
-    // URL 里的数字只是最后兜底，随机 ID / 重定向页面上它纯属噪声，
-    // 所以排在 DOM 和标题之后，且只认明确像集号的那几个位置。
-    if (res.page < 0) res.page = vvEpNumFromUrl(page);
     try {
         var cur = VV.active && VV.active.item ? VV.active.item.url : '';
         for (var k = 0; k < media.length; k++) if (media[k].item.url === cur) { res.media = media[k].num; break; }
@@ -9789,8 +10069,9 @@ function vvEpGoElement(ep, hashUrl) {
             cand = it; break;
         }
         if (!cand) { vvToast('页面没吐出新的视频地址，可点「刷新」再扫一次', true); return; }
-        try { openPlayer(cand); } catch (e3) {}
-        try { vvSetTitle('第 ' + ep.num + ' 集 · ' + vvPageTitle()); } catch (e4) {}
+        // 集号跟着 openPlayer 一起带过去：标题栏和选集高亮都靠它，
+        // 这里再单独 vvSetTitle 会把 vvPageTitle 的转义再过一遍
+        try { openPlayer(cand, { epNum: ep.num }); } catch (e3) {}
     }, 1500);
 }
 
@@ -9799,8 +10080,7 @@ function vvEpGo(ep) {
     vvEpisodesClose();
     if (ep.kind === 'media') {
         if (ep.item) {
-            try { openPlayer(ep.item); } catch (e) {}
-            try { vvSetTitle('第 ' + ep.num + ' 集 · ' + vvPageTitle()); } catch (e2) {}
+            try { openPlayer(ep.item, { epNum: ep.num }); } catch (e) {}
             vvToast('已切到第 ' + ep.num + ' 集');
         }
         return;
@@ -9887,6 +10167,11 @@ function vvMain() {
                 epGo: vvEpGo,
                 // 连播下一集解析的现场：选集表优先 / 媒体 bump 兜底
                 findNext: vvFindNext,
+                // 「下一集」的原地换集链路：按钮 / 取回下一集页面 / 解析器，分开暴露，
+                // 真机与桌面验证能分别断言"有没有跳页""解析出哪些地址"
+                goNext: vvGoNext,
+                nextFromPage: vvNextFromPage,
+                nextMedia: vvMediaFromHtml,
                 // 字幕现场：轨道列表 / 当前选中 / TextTrack 模式与 cue 数（真机验证用）
                 subs: function () {
                     var a = VV.active || {};

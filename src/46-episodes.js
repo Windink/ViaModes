@@ -277,30 +277,39 @@ function vvEpCurrent(page, media) {
     var hereFull = location.href;
     var here = hereFull.split('#')[0];
     var res = { page: -1, media: -1 };
-    // 先比完整地址（带 #ep=3 的站内锚点式选集），再比去掉锚点的地址
-    for (var h = 0; h < page.length; h++) {
-        if (page[h].href && page[h].href === hereFull) { res.page = page[h].num; break; }
-    }
-    if (res.page < 0) {
-        for (var i = 0; i < page.length; i++) {
-            if (page[i].href && page[i].href.split('#')[0] === here) { res.page = page[i].num; break; }
+    // 播放器内原地换集（「下一集」/选集直链）之后，地址和 DOM 选中态都还停在原来那一集，
+    // 只有 VV._curEp 是准的：它由换集那一侧写、关播放器时清。
+    // 注意仍要确认这一集在这组候选里，否则整组认错时会把高亮钉在不存在的格子上。
+    var over = -1;
+    if (VV._curEp && VV._curEp.num >= 0) over = vvEpNumInCands(VV._curEp.num, page);
+    if (over >= 0) {
+        res.page = over;
+    } else {
+        // 先比完整地址（带 #ep=3 的站内锚点式选集），再比去掉锚点的地址
+        for (var h = 0; h < page.length; h++) {
+            if (page[h].href && page[h].href === hereFull) { res.page = page[h].num; break; }
         }
-    }
-    // 跨页面选集常见：每集一个随机 ID 地址，还会重定向，URL 里根本没有集号。
-    // 这时站点 DOM 上的选中态、以及标题里的「第 N 集」才是唯一可靠信号。
-    if (res.page < 0) {
-        for (var a = 0; a < page.length; a++) {
-            if (vvEpIsCurrentEl(page[a].el)) { res.page = page[a].num; break; }
+        if (res.page < 0) {
+            for (var i = 0; i < page.length; i++) {
+                if (page[i].href && page[i].href.split('#')[0] === here) { res.page = page[i].num; break; }
+            }
         }
+        // 跨页面选集常见：每集一个随机 ID 地址，还会重定向，URL 里根本没有集号。
+        // 这时站点 DOM 上的选中态、以及标题里的「第 N 集」才是唯一可靠信号。
+        if (res.page < 0) {
+            for (var a = 0; a < page.length; a++) {
+                if (vvEpIsCurrentEl(page[a].el)) { res.page = page[a].num; break; }
+            }
+        }
+        if (res.page < 0) {
+            // 「第 7 集」和「第7集」都要认，标题里有没有空格全看站点
+            var tm = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回|部)/i.exec(document.title || '');
+            if (tm) res.page = vvEpNumInCands(parseInt(tm[1], 10), page);
+        }
+        // URL 里的数字只是最后兜底，随机 ID / 重定向页面上它纯属噪声，
+        // 所以排在 DOM 和标题之后，且只认明确像集号的那几个位置。
+        if (res.page < 0) res.page = vvEpNumFromUrl(page);
     }
-    if (res.page < 0) {
-        // 「第 7 集」和「第7集」都要认，标题里有没有空格全看站点
-        var tm = /(?:第\s*|EP\.?\s*)(\d{1,4})\s*(?:集|话|話|期|回|部)/i.exec(document.title || '');
-        if (tm) res.page = vvEpNumInCands(parseInt(tm[1], 10), page);
-    }
-    // URL 里的数字只是最后兜底，随机 ID / 重定向页面上它纯属噪声，
-    // 所以排在 DOM 和标题之后，且只认明确像集号的那几个位置。
-    if (res.page < 0) res.page = vvEpNumFromUrl(page);
     try {
         var cur = VV.active && VV.active.item ? VV.active.item.url : '';
         for (var k = 0; k < media.length; k++) if (media[k].item.url === cur) { res.media = media[k].num; break; }
@@ -504,8 +513,9 @@ function vvEpGoElement(ep, hashUrl) {
             cand = it; break;
         }
         if (!cand) { vvToast('页面没吐出新的视频地址，可点「刷新」再扫一次', true); return; }
-        try { openPlayer(cand); } catch (e3) {}
-        try { vvSetTitle('第 ' + ep.num + ' 集 · ' + vvPageTitle()); } catch (e4) {}
+        // 集号跟着 openPlayer 一起带过去：标题栏和选集高亮都靠它，
+        // 这里再单独 vvSetTitle 会把 vvPageTitle 的转义再过一遍
+        try { openPlayer(cand, { epNum: ep.num }); } catch (e3) {}
     }, 1500);
 }
 
@@ -514,8 +524,7 @@ function vvEpGo(ep) {
     vvEpisodesClose();
     if (ep.kind === 'media') {
         if (ep.item) {
-            try { openPlayer(ep.item); } catch (e) {}
-            try { vvSetTitle('第 ' + ep.num + ' 集 · ' + vvPageTitle()); } catch (e2) {}
+            try { openPlayer(ep.item, { epNum: ep.num }); } catch (e) {}
             vvToast('已切到第 ' + ep.num + ' 集');
         }
         return;
