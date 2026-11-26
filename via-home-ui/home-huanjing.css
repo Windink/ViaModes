@@ -1,13 +1,17 @@
 /* ============================================================
    幻境 · 满幅入画 —— Via 手机主页
-   用法：整段粘进 Via「设置 → 定制 → 高级 → 自定义 CSS」，
-        背景图放 files/assets/huanjing-bg.jpg（相对路径取）。
+   用法：整段粘进 Via「设置 → 定制 → 高级 → 自定义 CSS」。
+   壁纸不写在这份 CSS 里：走「设置 → 定制 → 背景」（图片 / 预设色 / 不透明度），
+   本样式把页面留空透出壁纸，只加一层随内容分布的可读性压暗。
    纯 CSS，无脚本，不改 DOM；说明见 via-home-ui/VIA_HOME_UI_SCHEMES_FROM_ART.md
    ============================================================ */
 
 /* ---------- 0. 令牌 ---------- */
 :root{
-  --hj-bg:#040F14;
+  /* 压暗层的墨色与强度：壁纸再亮，字也压得住；调低强度就更多壁纸 */
+  --hj-veil-ink:4,15,20;
+  --hj-veil:1;
+
   --hj-ink:#F4ECF4;
   --hj-rouge:#D9557F;
 
@@ -25,36 +29,45 @@
   --hj-sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
 }
 
-/* ---------- 1. 画布 ---------- */
+/* ---------- 1. 画布 ----------
+   壁纸的唯一来源是 Via「设置 → 定制 → 背景」：它画在 WebView 之下（原生层），
+   所以这里必须保持透明，换图 / 换预设色 / 拖动不透明度才会立刻反映到主页。
+   千万别在这层再写 url(...)——那会把用户选的壁纸整块盖掉。 */
 html{
-  background:var(--hj-bg);
+  background:transparent;
   -webkit-text-size-adjust:100%;
 }
 body{
   width:100%;
   max-width:none;
   margin:0;
-  background:var(--hj-bg);
+  background:transparent;
   overflow:hidden;              /* 主页不滚动，避免橡皮筋把画心带歪 */
 }
 #gesture-indicator{
-  background:var(--hj-bg) url("assets/huanjing-bg.jpg") 50% 18% / cover no-repeat;
+  background:transparent;
 }
-/* 顶部护状态栏、底部压导航条，中间全透明把人和笛子让出来 */
+/* 唯一的例外是「字要看得清」：一层随内容分布的可读性压暗（可调 --hj-veil）。
+   整页留一层底色（中间 .26、两端 .8+），而不是只在文字处打补丁——
+   这样壁纸换成浅色、或用户把「不透明度」拉高变白，白字也不会糊；
+   上下两端再压厚一点，把标题、搜索条、圆印稳稳托住。 */
 #gesture-indicator::before{
   content:"";
   position:absolute;
   inset:0;
   pointer-events:none;
   background:linear-gradient(180deg,
-    rgba(4,15,20,.74) 0%,
-    rgba(4,15,20,.30) 9%,
-    rgba(4,15,20,.04) 24%,
-    rgba(4,15,20,0)   40%,
-    rgba(4,15,20,.05) 56%,
-    rgba(4,15,20,.42) 76%,
-    rgba(4,15,20,.86) 92%,
-    rgba(4,15,20,.94) 100%);
+    rgba(var(--hj-veil-ink),.82) 0%,
+    rgba(var(--hj-veil-ink),.52) 8%,
+    rgba(var(--hj-veil-ink),.42) 18%,
+    rgba(var(--hj-veil-ink),.40) 30%,
+    rgba(var(--hj-veil-ink),.30) 42%,
+    rgba(var(--hj-veil-ink),.26) 55%,
+    rgba(var(--hj-veil-ink),.40) 68%,
+    rgba(var(--hj-veil-ink),.62) 80%,
+    rgba(var(--hj-veil-ink),.88) 92%,
+    rgba(var(--hj-veil-ink),.94) 100%);
+  opacity:var(--hj-veil);
 }
 
 /* 水面流光：两团水下波光极慢地漂，给静止的插画一点「水在动」的呼吸。
@@ -141,7 +154,9 @@ body{
   text-indent:.15em;            /* 只补半个字距，末字的光学重心才落在中线上 */
   color:var(--hj-ink);
   white-space:nowrap;
-  text-shadow:0 0 42px rgba(217,85,127,.30),0 2px 26px rgba(4,15,20,.6);
+  text-shadow:0 0 42px rgba(217,85,127,.30),
+              0 2px 10px rgba(4,15,20,.78),
+              0 0 30px rgba(4,15,20,.55);
 }
 .search_part::after{
   content:"rù huà / a flute in the mist";
@@ -153,7 +168,9 @@ body{
   letter-spacing:.26em;
   text-indent:.13em;
   color:var(--hj-text-2);
-  text-shadow:0 1px 12px rgba(3,14,19,.85),0 0 22px rgba(3,14,19,.6);
+  text-shadow:0 1px 12px rgba(3,14,19,.85),
+              0 0 22px rgba(3,14,19,.6),
+              0 0 4px rgba(3,14,19,.9);
   white-space:nowrap;
 }
 
