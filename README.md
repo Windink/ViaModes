@@ -1,7 +1,9 @@
-# ViaModes · Via 视频嗅探播放器
+# ViaModes · Via 插件集合
 
-一个适用于 **Via 浏览器（Android）** 的油猴脚本（UserScript），实现「网页视频嗅探 + 全屏沉浸播放器」体验。
+ViaModes 是面向 **Via 浏览器（Android）** 的插件集合，当前收录「视频嗅探播放器」——一个油猴脚本（UserScript），实现「网页视频嗅探 + 全屏沉浸播放器」体验。
 
+- 用途：嗅探网页里的 mp4 / m3u8 等媒体，在内置播放器里播放，并提供选集、续播、网页铺满与导出给外部播放器等能力。
+- 适用场景：在 Via 中观看网页视频；需要选集连播、多标签播放治理，或把嗅探到的媒体交给外部播放器时使用。
 - 产物：`dist/via-video-player.user.js`（单文件，~780KB，内含 hls.js）
 - 无需 npm 依赖，`node build.mjs` 即可从 `src/` 合并构建
 
