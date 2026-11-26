@@ -48,18 +48,22 @@ body{
   background:transparent;
 }
 /* 唯一的例外是「字要看得清」：一层随内容分布的可读性压暗（可调 --hj-veil）。
-   整页留一层底色（中间 .26、两端 .8+），而不是只在文字处打补丁——
+   整页留一层底色（中间 .26、上下 .8+），而不是只在文字处打补丁——
    这样壁纸换成浅色、或用户把「不透明度」拉高变白，白字也不会糊；
-   上下两端再压厚一点，把标题、搜索条、圆印稳稳托住。 */
+   上下两端再压厚一点，把标题、搜索条、圆印稳稳托住。
+   注意 0% 必须是透明：状态栏那截是 Via 原生画的（CSS 碰不到），
+   页面顶端一压暗就会和它形成一条横向接缝；所以压暗从 0% 平滑长起来。 */
 #gesture-indicator::before{
   content:"";
   position:absolute;
   inset:0;
   pointer-events:none;
   background:linear-gradient(180deg,
-    rgba(var(--hj-veil-ink),.82) 0%,
-    rgba(var(--hj-veil-ink),.52) 8%,
-    rgba(var(--hj-veil-ink),.42) 18%,
+    rgba(var(--hj-veil-ink),0)   0%,
+    rgba(var(--hj-veil-ink),.10) 3%,
+    rgba(var(--hj-veil-ink),.26) 8%,
+    rgba(var(--hj-veil-ink),.38) 14%,
+    rgba(var(--hj-veil-ink),.42) 22%,
     rgba(var(--hj-veil-ink),.40) 30%,
     rgba(var(--hj-veil-ink),.30) 42%,
     rgba(var(--hj-veil-ink),.26) 55%,
@@ -125,7 +129,8 @@ body{
   font-size:9px;
   line-height:1;
   letter-spacing:.3em;
-  color:var(--hj-text-3);
+  color:rgba(239,231,241,.78);  /* 顶端压暗渐隐，这枚小字得自己带影子才看得清 */
+  text-shadow:0 1px 6px rgba(4,15,20,.95),0 0 12px rgba(4,15,20,.75);
   pointer-events:none;
 }
 
