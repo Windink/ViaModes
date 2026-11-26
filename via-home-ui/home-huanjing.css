@@ -1,0 +1,468 @@
+/* ============================================================
+   幻境 · 满幅入画 —— Via 手机主页
+   用法：整段粘进 Via「设置 → 定制 → 高级 → 自定义 CSS」，
+        背景图放 files/assets/huanjing-bg.jpg（相对路径取）。
+   纯 CSS，无脚本，不改 DOM；说明见 via-home-ui/VIA_HOME_UI_SCHEMES_FROM_ART.md
+   ============================================================ */
+
+/* ---------- 0. 令牌 ---------- */
+:root{
+  --hj-bg:#040F14;
+  --hj-ink:#F4ECF4;
+  --hj-rouge:#D9557F;
+
+  --hj-hair:rgba(239,231,241,.22);
+  --hj-hair-strong:rgba(239,231,241,.42);
+  --hj-text-2:rgba(239,231,241,.58);
+  --hj-text-3:rgba(239,231,241,.42);
+
+  --hj-radius-bar:999px;
+  --hj-pad-x:20px;
+  --hj-ease:cubic-bezier(.22,.5,.32,1);
+  --hj-dur:.3s;
+
+  --hj-serif:"Noto Serif CJK SC","Source Han Serif SC","Songti SC",STSong,SimSun,serif;
+  --hj-sans:"Noto Sans SC","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+
+/* ---------- 1. 画布 ---------- */
+html{
+  background:var(--hj-bg);
+  -webkit-text-size-adjust:100%;
+}
+body{
+  width:100%;
+  max-width:none;
+  margin:0;
+  background:var(--hj-bg);
+  overflow:hidden;              /* 主页不滚动，避免橡皮筋把画心带歪 */
+}
+#gesture-indicator{
+  background:var(--hj-bg) url("assets/huanjing-bg.jpg") 50% 18% / cover no-repeat;
+}
+/* 顶部护状态栏、底部压导航条，中间全透明把人和笛子让出来 */
+#gesture-indicator::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(180deg,
+    rgba(4,15,20,.74) 0%,
+    rgba(4,15,20,.30) 9%,
+    rgba(4,15,20,.04) 24%,
+    rgba(4,15,20,0)   40%,
+    rgba(4,15,20,.05) 56%,
+    rgba(4,15,20,.42) 76%,
+    rgba(4,15,20,.86) 92%,
+    rgba(4,15,20,.94) 100%);
+}
+
+/* 水面流光：两团水下波光极慢地漂，给静止的插画一点「水在动」的呼吸。
+   走 transform（合成层），不动 background-position，避免大面积重绘。 */
+#gesture-indicator::after{
+  content:"";
+  position:absolute;
+  inset:-10% -16%;
+  pointer-events:none;
+  background:
+    /* 贴水面的两道横向波光：暗压区里最容易被看见的「水在流动」 */
+    radial-gradient(52% 7% at 24% 74%, rgba(176,255,250,.40), transparent 72%),
+    radial-gradient(44% 6% at 70% 81%, rgba(202,232,255,.34), transparent 74%),
+    radial-gradient(60% 8% at 46% 88%, rgba(228,252,255,.26), transparent 76%),
+    radial-gradient(72% 9% at 58% 95%, rgba(170,252,248,.20), transparent 78%),
+    radial-gradient(40% 22% at 30% 64%, rgba(150,240,238,.16), transparent 72%);
+  animation:hjFlow 14s ease-in-out infinite alternate;
+  will-change:transform,opacity;
+}
+@keyframes hjFlow{
+  0%  { transform:translate3d(-3.5%,.8%,0)  scale(1);    opacity:.5; }
+  50% { transform:translate3d(1.5%,-.6%,0)  scale(1.04); opacity:.9; }
+  100%{ transform:translate3d(3.5%,-1.2%,0) scale(1.02); opacity:.62; }
+}
+
+/* ---------- 2. 中轴容器 ---------- */
+#content{
+  position:fixed;
+  inset:0;
+  width:100%;
+  max-width:none;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:calc(5vh + env(safe-area-inset-top,0px)) var(--hj-pad-x)
+          calc(4vh + env(safe-area-inset-bottom,0px));
+  box-sizing:border-box;
+  background:transparent;
+  z-index:2;
+  font-family:var(--hj-sans);
+  /* Via 的 trigger 点击会把 #content 内联设成 opacity:.1 + translateY(72px)，
+     再在 120ms 后跳原生搜索。不压住 opacity 的话，水波刚起就跟着整页淡没了。 */
+  opacity:1 !important;
+}
+
+/* 折次：右上竖排，和左侧的标题形成不对称 */
+#content::after{
+  content:"第 叁 折 · 雪";
+  position:fixed;
+  top:calc(4.2vh + env(safe-area-inset-top,0px));
+  right:16px;
+  writing-mode:vertical-rl;
+  font-family:var(--hj-sans);
+  font-size:9px;
+  line-height:1;
+  letter-spacing:.3em;
+  color:var(--hj-text-3);
+  pointer-events:none;
+}
+
+/* ---------- 3. 标题组 ---------- */
+.search_part{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  flex:1 1 auto;
+  width:100%;
+  max-width:520px;
+  min-height:0;
+  margin:0 auto;
+  padding:0;
+}
+.search_part::before{
+  content:"入 画";
+  order:0;
+  flex:0 0 auto;
+  margin-top:16.5vh;            /* 顶部标已去掉，标题承担「第一眼」 */
+  font-family:var(--hj-serif);
+  font-size:clamp(46px,15.5vw,74px);
+  font-weight:600;
+  line-height:1;
+  letter-spacing:.3em;
+  text-indent:.15em;            /* 只补半个字距，末字的光学重心才落在中线上 */
+  color:var(--hj-ink);
+  white-space:nowrap;
+  text-shadow:0 0 42px rgba(217,85,127,.30),0 2px 26px rgba(4,15,20,.6);
+}
+.search_part::after{
+  content:"rù huà / a flute in the mist";
+  order:1;
+  flex:0 0 auto;
+  margin-top:18px;
+  font-family:var(--hj-sans);
+  font-size:9.5px;
+  letter-spacing:.26em;
+  text-indent:.13em;
+  color:var(--hj-text-2);
+  text-shadow:0 1px 12px rgba(3,14,19,.85),0 0 22px rgba(3,14,19,.6);
+  white-space:nowrap;
+}
+
+/* ---------- 4. 搜索条 ---------- */
+.search_bar_wrapper{
+  order:2;
+  flex:0 0 auto;
+  margin-top:auto;              /* 把「条 + 圆印」这一组推到下半屏 */
+  margin-bottom:0;
+  width:100%;
+  max-width:480px;
+  display:block;
+}
+
+form.search_bar{
+  display:flex;
+  align-items:center;
+  width:100%;
+  height:50px;
+  overflow:hidden;              /* 裁住横扫，别让它飞出条外 */
+  padding:0 16px;
+  box-sizing:border-box;
+  border:1px solid var(--hj-hair);
+  border-radius:var(--hj-radius-bar);
+  background:linear-gradient(180deg,rgba(239,245,244,.14),rgba(3,16,22,.80));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.20),0 18px 40px -18px rgba(0,0,0,.75);
+  color:rgba(239,231,241,.75);
+  transition:border-color var(--hj-dur) var(--hj-ease),
+             background var(--hj-dur) var(--hj-ease),
+             box-shadow var(--hj-dur) var(--hj-ease);
+}
+/* 提示语：输入框没有 placeholder 属性，只能拿伪元素写（输入框被禁用，不会打架） */
+form.search_bar::before{
+  content:"想问什么，先落一笔";
+  position:absolute;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-family:var(--hj-sans);
+  font-size:13.5px;
+  letter-spacing:.1em;
+  text-indent:.1em;
+  color:var(--hj-text-2);
+  pointer-events:none;
+  transition:color var(--hj-dur) var(--hj-ease);
+}
+/* 水光横扫：一道 104° 的亮带从左掠过 */
+form.search_bar::after{
+  content:"";
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:0;
+  width:64%;
+  border-radius:inherit;
+  background:linear-gradient(104deg,transparent 30%,rgba(243,252,255,.78) 50%,transparent 70%);
+  opacity:0;
+  transform:translateX(-120%);
+  pointer-events:none;
+}
+
+form.search_bar > span{
+  display:block;
+  flex:1 1 auto;
+  min-width:0;
+  height:100%;
+  padding:0;
+  overflow:visible;
+}
+#search_input{
+  width:100%;
+  height:100%;
+  padding:0;
+  background:transparent;       /* 必须显式：否则露出 WebView 的 #EFEFEF */
+  border:0;
+  outline:none;
+  color:transparent;            /* 内容不显示，用伪元素提示语占位 */
+  font-size:15px;
+  caret-color:transparent;
+}
+
+/* 放大镜：默认 display:none，这里放出来并排到左侧 */
+#search_submit{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  order:0;
+  position:static;
+  float:none;
+  flex:0 0 auto;
+  width:18px;
+  height:18px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:rgba(239,231,241,.62);
+}
+#search_submit .search.icon{
+  width:11px;
+  height:11px;
+  border:1.5px solid currentColor;
+  border-radius:100%;
+  background:none;
+  margin:0;
+}
+#search_submit .search.icon::before{
+  content:"";
+  position:absolute;
+  top:8px;
+  left:2.5px;
+  height:4px;
+  width:1.5px;
+  background:currentColor;
+}
+
+/* 触发层：铺满整条；默认 46px 高会在 50px 的条子里留 4px 死区 */
+#search_bar_trigger{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:auto;
+  padding:0;
+  border:0;
+  border-radius:var(--hj-radius-bar);
+  background:transparent;
+  z-index:1;                    /* 高于 form：涟漪伪元素才能画在条子之上 */
+}
+#search_bar_trigger:focus-visible{ outline:none; }
+
+/* ---------- 5. 点击反馈：两圈水波 + 条内水光 ---------- */
+/* 两圈椭圆错开荡开（0 / .2s）：内圈近白、外圈胭脂，越外越淡越大。
+   涟漪必须在 #search_bar_trigger 的伪元素上——挂 .search_bar_wrapper 会被
+   form.search_bar 的实底背景整片盖住，真机上只看得见露出条外的 10px。
+   基点 transform 直接写成扩散之后的形貌，关键帧被移除时不会往外跳一下。 */
+#search_bar_trigger::before,
+#search_bar_trigger::after{
+  content:"";
+  position:absolute;
+  inset:-10px;
+  border-radius:50%;
+  border:1px solid rgba(240,255,255,.90);
+  /* 用多层阴影做柔边，代替 filter:blur——
+     WebView 110 上伪元素同时挂 filter + animation 会整层不渲染（真机踩到）。 */
+  box-shadow:0 0 0 1px rgba(240,255,255,.18),
+             0 0 6px 1px rgba(240,255,255,.22),
+             0 0 16px 2px rgba(240,255,255,.16),
+             inset 0 0 0 6px rgba(2,16,22,.10);
+  opacity:0;
+  transform:scale(var(--sx,1.1),var(--sy,1.8));
+  transition:opacity .5s ease-out;
+  pointer-events:none;
+  will-change:transform,opacity;
+}
+/* 内圈：贴着条子往外推一圈，最亮 */
+#search_bar_trigger::before{ --sx:1.06; --sy:1.55; --o:.95; }
+/* 外圈：更远更淡，带一点胭脂，像水面荡出去的第二道 */
+#search_bar_trigger::after {
+  --sx:1.13; --sy:2.15; --o:.72;
+  border-color:rgba(255,178,206,.78);
+  box-shadow:0 0 18px rgba(255,178,206,.28),0 0 5px rgba(255,178,206,.24);
+  transition-delay:.16s;
+}
+
+.search_bar_wrapper:active #search_bar_trigger::before{
+  opacity:var(--o);
+  transition:none;
+  animation:hjRipple .90s var(--hj-ease) both;
+}
+.search_bar_wrapper:active #search_bar_trigger::after{
+  opacity:var(--o);
+  transition:none;
+  animation:hjRipple 1.15s var(--hj-ease) .2s both;
+}
+@keyframes hjRipple{
+  0%  { transform:scale(1,1); opacity:var(--o); }
+  38% { opacity:calc(var(--o) * .68); }
+  100%{ transform:scale(var(--sx),var(--sy)); opacity:0; }
+}
+
+/* 按下：条子本身的下压回弹 + 描边提亮 + 提示语转亮 */
+.search_bar_wrapper:active form.search_bar{
+  border-color:rgba(239,231,241,.50);
+  background:linear-gradient(180deg,rgba(239,245,244,.21),rgba(4,18,24,.80));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),
+             0 0 0 3px rgba(217,85,127,.10),
+             0 18px 40px -18px rgba(0,0,0,.75);
+  transform:scale(1.005,.94);
+}
+form.search_bar{
+  transition:border-color var(--hj-dur) var(--hj-ease),
+             background var(--hj-dur) var(--hj-ease),
+             box-shadow var(--hj-dur) var(--hj-ease),
+             transform var(--hj-dur) var(--hj-ease);
+}
+.search_bar_wrapper:active form.search_bar::before{
+  color:rgba(239,231,241,.80);
+}
+.search_bar_wrapper:active form.search_bar::after{
+  animation:hjSweep 1.9s linear infinite;
+}
+/* 水光循环流过条子：按住期间一直流，松手停住后淡掉 */
+@keyframes hjSweep{
+  0%  { opacity:0;  transform:translateX(-150%); }
+  18% { opacity:.95; }
+  82% { opacity:.85; }
+  100%{ opacity:0;  transform:translateX(250%); }
+}
+
+/* ---------- 6. 底部入口：藏（真实 Logo 链接 → 书签） ---------- */
+a.logo{
+  order:3;
+  flex:0 0 auto;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:9px;
+  width:auto;
+  height:auto;
+  margin:22px 0 7vh;            /* 底部留一段，别把入口压在手势区 */
+  padding:0;
+  overflow:visible;
+  font-size:0;
+  line-height:0;
+}
+a.logo img.smaller{ display:none; }   /* 换掉被洗白的彩色 Logo，改用字印 */
+
+a.logo::before{
+  content:"藏";
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:48px;
+  height:48px;
+  box-sizing:border-box;
+  border:1px solid var(--hj-hair);
+  border-radius:50%;
+  background:linear-gradient(180deg,rgba(239,245,244,.10),rgba(4,18,24,.46));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 0 0 0 rgba(217,85,127,0);
+  font-family:var(--hj-serif);
+  font-size:18px;
+  line-height:1;
+  color:rgba(239,231,241,.8);
+  letter-spacing:0;
+  text-indent:0;
+  transition:transform var(--hj-dur) var(--hj-ease),
+             border-color var(--hj-dur) var(--hj-ease),
+             box-shadow var(--hj-dur) var(--hj-ease),
+             color var(--hj-dur) var(--hj-ease);
+}
+a.logo::after{
+  content:"藏书";
+  font-family:var(--hj-sans);
+  font-size:9.5px;
+  line-height:1;
+  letter-spacing:.26em;
+  color:rgba(239,231,241,.55);
+  white-space:nowrap;
+  transition:color var(--hj-dur) var(--hj-ease);
+}
+/* 按下：缩一点 + 胭脂外扩光晕，松手自动回弹（走 transition，不会硬切） */
+a.logo:active::before,
+a.logo:focus-visible::before{
+  transform:scale(.94);
+  border-color:rgba(217,85,127,.6);
+  color:#FBEAF1;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.2),
+             0 0 0 6px rgba(217,85,127,.14),
+             0 10px 26px -10px rgba(217,85,127,.65);
+}
+a.logo:active::after,
+a.logo:focus-visible::after{ color:rgba(251,234,241,.85); }
+
+/* ---------- 7. 建议列表：深色兜底 ---------- */
+/* 表单是 inert，正常不会弹出；只为某些版本没有触发层时兜住白底 */
+.opSug_wpr{
+  background:rgba(8,24,30,.94);
+  border:1px solid var(--hj-hair);
+  border-radius:0 0 18px 18px;
+}
+.opSug_wpr td{ color:rgba(239,231,241,.78); }
+.opSug_wpr tr:hover{ background:rgba(217,85,127,.35); color:#fff; }
+.search_bar_active{
+  border-radius:18px 18px 0 0;
+  background:rgba(8,24,30,.94);
+  color:rgba(239,231,241,.9);
+}
+
+/* ---------- 8. 断点 ---------- */
+@media (min-width:640px){
+  .search_part::before{ font-size:clamp(56px,7vw,84px); margin-top:16vh; }
+  .search_bar_wrapper{ max-width:460px; }
+  form.search_bar{ height:54px; }
+}
+@media (max-height:520px){
+  .search_part::before{ margin-top:6vh; font-size:clamp(38px,9vw,56px); }
+  a.logo{ margin:12px 0 4vh; }
+  a.logo::before{ width:42px; height:42px; font-size:16px; }
+}
+
+/* 系统开了「减少动态效果」就只留状态变化 */
+@media (prefers-reduced-motion:reduce){
+  #gesture-indicator::after{ animation:none; opacity:.5; }
+  .search_bar_wrapper:active #search_bar_trigger::before,
+  .search_bar_wrapper:active #search_bar_trigger::after,
+  .search_bar_wrapper:active form.search_bar::after{
+    animation:none;
+  }
+  #search_bar_trigger::before,
+  #search_bar_trigger::after{ transform:scale(var(--sx),var(--sy)); opacity:0; }
+}

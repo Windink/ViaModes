@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Via 主界面 · 英雄联盟电玩主题</title>
+<style>
+/* ============================================================
+   Via 主界面 · 英雄联盟电玩主题（独立原型）
+   内容映射：.logo → a.logo / img.smaller
+             .search → form.search_bar / #search_input
+             .suggest → .opSug_wpr（输入时动态出现）
+   纯 HTML + CSS，少量脚本只用于还原「搜索建议」这一原有交互。
+   不引入框架、不外链字体/图片，不修改任何现有插件文件。
+   ============================================================ */
+:root {
+  --bg: #050914;
+  --bg-2: #0a1228;
+  --panel: rgba(10, 18, 42, .94);
+  --cyan: #35e8ff;
+  --gold: #ffd45e;
+  --pink: #ff4d9d;
+  --violet: #7b5cff;
+  --ink: #07101f;
+  --text: #eaf6ff;
+  --muted: rgba(214, 232, 255, .64);
+  --line: rgba(53, 232, 255, .28);
+  --shadow: 0 24px 70px rgba(0, 0, 0, .60);
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  color: var(--text);
+  font-family: var(--font);
+  background:
+    radial-gradient(90% 70% at 18% 8%, rgba(53,232,255,.14), transparent 58%),
+    radial-gradient(80% 65% at 84% 78%, rgba(255,77,157,.12), transparent 60%),
+    radial-gradient(120% 100% at 50% 120%, rgba(123,92,255,.16), transparent 65%),
+    linear-gradient(165deg, var(--bg) 0%, var(--bg-2) 52%, #070a1a 100%);
+  overflow-x: hidden;
+}
+
+/* 静态网格 + 扫描线：街机屏幕质感，不参与逐帧计算 */
+.grid, .scanlines, .glow { position: fixed; inset: 0; pointer-events: none; }
+.grid {
+  z-index: 0;
+  background:
+    repeating-linear-gradient(90deg, rgba(53,232,255,.055) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(0deg, rgba(53,232,255,.045) 0 1px, transparent 1px 48px);
+  -webkit-mask-image: radial-gradient(80% 70% at 50% 42%, #000 20%, transparent 100%);
+  mask-image: radial-gradient(80% 70% at 50% 42%, #000 20%, transparent 100%);
+}
+.scanlines {
+  z-index: 4;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,.022) 0 1px, transparent 1px 4px);
+  opacity: .8;
+}
+.glow { z-index: 0; }
+.glow::before, .glow::after {
+  content: "";
+  position: absolute;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(53,232,255,.13), transparent 66%);
+}
+.glow::before { left: -18vmax; top: -20vmax; }
+.glow::after {
+  right: -20vmax;
+  bottom: -22vmax;
+  background: radial-gradient(circle, rgba(255,77,157,.12), transparent 66%);
+}
+
+/* 顶部 HUD */
+.hud {
+  position: relative;
+  z-index: 3;
+  width: min(1160px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hud-brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.hud-mark {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  font: 900 18px/1 var(--mono);
+  color: var(--ink);
+  background: linear-gradient(135deg, #fff2b8, var(--gold), #ff9e3d);
+  clip-path: polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  box-shadow: 0 0 22px rgba(255,212,94,.35);
+}
+.hud-title {
+  font: 900 19px/1.1 var(--font);
+  letter-spacing: .14em;
+  white-space: nowrap;
+  text-shadow: 0 0 16px rgba(53,232,255,.45);
+}
+.hud-title em { color: var(--gold); font-style: normal; }
+.hud-sub {
+  margin-top: 4px;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: .18em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.hud-status { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.pill {
+  padding: 7px 12px;
+  border: 1px solid rgba(53,232,255,.30);
+  border-radius: 2px;
+  background: rgba(6,14,32,.72);
+  font: 700 10px/1 var(--mono);
+  letter-spacing: .12em;
+  color: var(--muted);
+  clip-path: polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);
+}
+.pill.on {
+  color: var(--cyan);
+  border-color: rgba(53,232,255,.62);
+  box-shadow: inset 0 0 14px rgba(53,232,255,.12), 0 0 12px rgba(53,232,255,.18);
+}
+
+/* 主舞台 */
+.stage {
+  position: relative;
+  z-index: 3;
+  min-height: calc(100dvh - 132px);
+  display: grid;
+  place-items: center;
+  padding: 18px 16px 54px;
+}
+.console {
+  position: relative;
+  width: min(760px, 94vw);
+  padding: 34px clamp(18px, 5vw, 46px) 26px;
+  background:
+    repeating-linear-gradient(0deg, rgba(255,255,255,.018) 0 1px, transparent 1px 5px),
+    linear-gradient(160deg, rgba(15,26,58,.96), rgba(6,11,26,.97));
+  border: 1px solid rgba(53,232,255,.38);
+  border-radius: 18px;
+  box-shadow: var(--shadow), inset 0 1px 0 rgba(53,232,255,.28), inset 0 -1px 0 rgba(255,212,94,.16);
+}
+.console::before, .console::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--cyan), var(--violet) 48%, var(--gold));
+  box-shadow: 0 0 14px rgba(53,232,255,.50);
+}
+.console::before { top: 0; }
+.console::after { bottom: 0; opacity: .65; }
+.console-top, .console-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font: 700 10px/1.4 var(--mono);
+  letter-spacing: .16em;
+  color: var(--muted);
+}
+.console-top { margin-bottom: 22px; }
+.console-top .tag { color: var(--gold); }
+
+/* Logo 区域：把原有 Via 标识做成游戏标题 */
+.logo-wrap { text-align: center; margin-bottom: 26px; }
+.logo {
+  display: inline-block;
+  font: 900 clamp(56px, 12vw, 92px)/.9 var(--font);
+  letter-spacing: .16em;
+  color: #fff;
+  -webkit-text-stroke: 1px rgba(53,232,255,.55);
+  text-shadow:
+    0 0 10px rgba(53,232,255,.75),
+    0 0 34px rgba(123,92,255,.55),
+    4px 4px 0 rgba(255,77,157,.30);
+}
+.logo-sub {
+  margin-top: 14px;
+  font: 700 11px/1 var(--mono);
+  letter-spacing: .28em;
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255,212,94,.40);
+}
+
+/* 搜索框：保留原生输入与提交语义，只换成街机启动台 */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: clamp(58px, 9vw, 72px);
+  padding: 0 8px 0 18px;
+  background: linear-gradient(180deg, rgba(11,22,50,.92), rgba(6,12,28,.94));
+  border: 2px solid rgba(53,232,255,.48);
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 4px rgba(5,9,20,.72),
+    0 0 26px rgba(53,232,255,.22),
+    inset 0 1px 0 rgba(255,255,255,.12),
+    inset 0 -2px 0 rgba(0,0,0,.45);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.search:focus-within {
+  border-color: var(--gold);
+  box-shadow:
+    0 0 0 4px rgba(5,9,20,.72),
+    0 0 30px rgba(255,212,94,.26),
+    inset 0 1px 0 rgba(255,255,255,.16);
+}
+.search-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  margin-right: 12px;
+  color: var(--cyan);
+  font: 700 22px/1 var(--mono);
+  text-shadow: 0 0 12px rgba(53,232,255,.65);
+}
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #fff;
+  font: 600 16px/1.2 var(--font);
+  letter-spacing: .02em;
+  caret-color: var(--gold);
+}
+.search input::placeholder { color: rgba(214,232,255,.48); }
+.search input::-webkit-search-cancel-button { filter: grayscale(1) brightness(1.8); }
+.launch {
+  flex: 0 0 auto;
+  min-width: 128px;
+  height: calc(100% - 10px);
+  border: 0;
+  padding: 0 20px;
+  color: #1b1200;
+  font: 900 13px/1 var(--mono);
+  letter-spacing: .16em;
+  cursor: pointer;
+  background: linear-gradient(135deg, #fff2b8 0%, var(--gold) 46%, #ff9e3d 100%);
+  clip-path: polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  box-shadow: 0 0 22px rgba(255,212,94,.42);
+  transition: transform .14s ease, filter .14s ease;
+}
+.launch:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.launch:active { transform: translateY(1px); }
+.launch:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+
+/* 搜索建议：对应 Via 输入时出现的 .opSug_wpr */
+.suggest {
+  position: absolute;
+  z-index: 10;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: linear-gradient(180deg, rgba(12,22,50,.98), rgba(6,12,28,.98));
+  border: 1px solid rgba(53,232,255,.42);
+  border-radius: 8px;
+  box-shadow: 0 18px 40px rgba(0,0,0,.55), 0 0 18px rgba(53,232,255,.16);
+}
+.suggest[hidden] { display: none; }
+.suggest li {
+  padding: 12px 14px;
+  border-radius: 4px;
+  font: 600 14px/1.3 var(--font);
+  color: var(--text);
+  cursor: pointer;
+}
+.suggest li::before {
+  content: "▸";
+  margin-right: 10px;
+  color: var(--cyan);
+}
+.suggest li:hover, .suggest li.active {
+  background: linear-gradient(90deg, rgba(53,232,255,.18), rgba(123,92,255,.10));
+  color: #fff;
+}
+.console-foot { margin-top: 18px; }
+.console-foot .level { color: var(--cyan); }
+.footer {
+  position: relative;
+  z-index: 3;
+  padding: 0 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
+  text-align: center;
+  font: 600 10px/1.5 var(--mono);
+  letter-spacing: .18em;
+  color: rgba(214,232,255,.38);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 桌面端：加一点侧翼装饰，强化电竞舞台感 */
+@media (min-width: 1024px) {
+  .stage::before, .stage::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 120px;
+    height: 240px;
+    transform: translateY(-50%);
+    border: 1px solid rgba(53,232,255,.14);
+    pointer-events: none;
+  }
+  .stage::before { left: max(2vw, 24px); border-right: 0; }
+  .stage::after { right: max(2vw, 24px); border-left: 0; }
+}
+/* 移动端：缩短 HUD、收窄按钮，保留 44px 以上点击高度 */
+@media (max-width: 640px) {
+  .hud { width: calc(100% - 24px); padding-top: calc(env(safe-area-inset-top, 0px) + 12px); }
+  .hud-title { font-size: 16px; letter-spacing: .10em; }
+  .hud-sub { font-size: 9px; letter-spacing: .12em; }
+  .pill { padding: 6px 8px; font-size: 9px; }
+  .pill:last-child { display: none; }
+  .stage { min-height: calc(100dvh - 104px); padding: 14px 12px 40px; }
+  .console { padding: 26px 16px 20px; border-radius: 14px; }
+  .console-top, .console-foot { font-size: 9px; letter-spacing: .10em; }
+  .logo-wrap { margin-bottom: 20px; }
+  .logo { letter-spacing: .10em; }
+  .logo-sub { letter-spacing: .18em; }
+  .search { padding-left: 12px; }
+  .search-icon { width: 22px; margin-right: 8px; }
+  .search input { font-size: 15px; }
+  .launch { min-width: 84px; padding: 0 12px; font-size: 11px; letter-spacing: .08em; }
+  .footer { font-size: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .launch, .search { transition: none; }
+}
+</style>
+</head>
+<body>
+  <div class="grid" aria-hidden="true"></div>
+  <div class="glow" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="hud">
+    <div class="hud-brand">
+      <div class="hud-mark" aria-hidden="true">V</div>
+      <div>
+        <div class="hud-title">VIA <em>ARCADE</em></div>
+        <div class="hud-sub">HOMEPAGE // SEARCH CONSOLE</div>
+      </div>
+    </div>
+    <div class="hud-status" aria-hidden="true">
+      <span class="pill on">SYSTEM ONLINE</span>
+      <span class="pill">SEARCH READY</span>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="console" aria-labelledby="page-title">
+      <div class="console-top">
+        <span>SEARCH MODULE_01</span>
+        <span class="tag">● READY</span>
+      </div>
+
+      <div class="logo-wrap">
+        <div class="logo" id="page-title">VIA</div>
+        <div class="logo-sub">PRESS START TO EXPLORE</div>
+      </div>
+
+      <form class="search" id="searchForm" role="search" action="https://www.baidu.com/s" method="get" target="_blank" autocomplete="off">
+        <label class="sr-only" for="q">搜索</label>
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="q" name="wd" type="search" placeholder="输入关键词，启动搜索..." aria-controls="suggest" aria-expanded="false">
+        <button class="launch" type="submit">START ▸</button>
+        <ul class="suggest" id="suggest" role="listbox" hidden></ul>
+      </form>
+
+      <div class="console-foot">
+        <span>TIP: ↑↓ 选择 · ENTER 启动</span>
+        <span class="level">LV.07 // READY</span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">VIA ARCADE EDITION · 独立视觉原型</footer>
+
+<script>
+(function () {
+  var DATA = [
+    '英雄联盟 2026 全球总决赛',
+    '云顶之弈 阵容推荐',
+    'LOL 电玩主题 皮肤合集',
+    'Via 浏览器 使用技巧',
+    '街机像素风 网页设计'
+  ];
+  var form = document.getElementById('searchForm');
+  var input = document.getElementById('q');
+  var box = document.getElementById('suggest');
+  var active = -1;
+
+  function close() {
+    box.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    active = -1;
+  }
+  function render() {
+    var q = (input.value || '').trim().toLowerCase();
+    var list = DATA.filter(function (x) { return !q || x.toLowerCase().indexOf(q) >= 0; }).slice(0, 5);
+    if (!list.length) { close(); return; }
+    box.innerHTML = '';
+    list.forEach(function (text, i) {
+      var li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.textContent = text;
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); input.value = text; close(); });
+      box.appendChild(li);
+    });
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    active = -1;
+  }
+  function move(delta) {
+    var items = Array.prototype.slice.call(box.querySelectorAll('li'));
+    if (!items.length) return;
+    if (active >= 0) items[active].classList.remove('active');
+    active = (active + delta + items.length) % items.length;
+    items[active].classList.add('active');
+    input.value = items[active].textContent;
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('focus', render);
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+    else if (e.key === 'Escape') { close(); }
+  });
+  form.addEventListener('submit', function (e) {
+    if (!(input.value || '').trim()) { e.preventDefault(); input.focus(); render(); }
+    else close();
+  });
+  document.addEventListener('click', function (e) { if (!form.contains(e.target)) close(); });
+})();
+</script>
+</body>
+</html>
